@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { playsWithinDays } from './stats.js';
 
 const CONDITION_KEYS = new Set(['minPlays', 'withinDays', 'minStreak', 'artists', 'genres']);
@@ -16,6 +16,10 @@ function normalizeCondition(ruleName, cond) {
     if (!CONDITION_KEYS.has(key)) {
       fail(ruleName, `unknown condition "${key}". Use one of: ${[...CONDITION_KEYS].join(', ')}.`);
     }
+  }
+  // An empty condition would match every song you've ever played.
+  if (!cond.minPlays && !cond.minStreak && !cond.artists?.length && !cond.genres?.length) {
+    fail(ruleName, 'each condition needs at least a play count, a streak, artists or genres.');
   }
   for (const key of ['minPlays', 'withinDays', 'minStreak']) {
     if (key in cond && !(Number.isInteger(cond[key]) && cond[key] > 0)) {
@@ -68,17 +72,26 @@ export function normalizeRules(raw) {
     });
 }
 
-export function loadRules(file) {
+/** The rules file exactly as written, without defaults filled in. */
+export function readRawRules(file) {
   if (!existsSync(file)) {
     throw new Error(`No rules file at ${file}. Copy rules.example.json to rules.json to get started.`);
   }
-  let raw;
   try {
-    raw = JSON.parse(readFileSync(file, 'utf8'));
+    return JSON.parse(readFileSync(file, 'utf8'));
   } catch (err) {
     throw new Error(`rules.json is not valid JSON: ${err.message}`);
   }
-  return normalizeRules(raw);
+}
+
+export function loadRules(file) {
+  return normalizeRules(readRawRules(file));
+}
+
+/** Validates every rule (including switched-off ones) and writes the file. Throws on the first problem. */
+export function saveRules(file, raw) {
+  normalizeRules({ rules: (raw?.rules ?? []).map((rule) => ({ ...rule, enabled: true })) });
+  writeFileSync(file, `${JSON.stringify(raw, null, 2)}\n`);
 }
 
 export const needsGenres = (rule) => rule.groupBy === 'genre' || rule.conditions.some((c) => c.genres);

@@ -60,6 +60,13 @@ test('groups by the most common genre among picked songs', () => {
   assert.deepEqual(byName, { 'Mix · Afrobeats': ['a', 'b'], 'Mix · Rap': ['c'] });
 });
 
+test('rejects a condition that would match every song', () => {
+  assert.throws(
+    () => normalizeRules({ rules: [{ name: 'r', playlist: 'P', match: [{ minPlays: 2 }, {}] }] }),
+    /at least a play count/,
+  );
+});
+
 test('rejects rules with typos in plain English', () => {
   assert.throws(
     () => normalizeRules({ rules: [{ name: 'r', playlist: 'P', match: { minPlay: 3 } }] }),
