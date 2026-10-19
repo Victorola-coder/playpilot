@@ -25,7 +25,11 @@ export async function request(method, pathOrUrl, { query, body } = {}) {
       body: body && JSON.stringify(body),
     });
 
-    if (res.ok) return res.status === 204 ? null : res.json();
+    if (res.ok) {
+      // Some write endpoints answer 200 with an empty body.
+      const text = await res.text();
+      return text ? JSON.parse(text) : null;
+    }
 
     const retryable = res.status === 429 || res.status >= 500;
     if (retryable && attempt < MAX_ATTEMPTS) {
@@ -40,6 +44,8 @@ export async function request(method, pathOrUrl, { query, body } = {}) {
 
 export const get = (path, query) => request('GET', path, { query });
 export const post = (path, body) => request('POST', path, { body });
+export const put = (path, query) => request('PUT', path, { query });
+export const del = (path, { query, body } = {}) => request('DELETE', path, { query, body });
 
 /** Yields every item across Spotify's paged responses. */
 export async function* paginate(path, query) {

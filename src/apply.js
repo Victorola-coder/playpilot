@@ -1,11 +1,19 @@
 import { config } from './config.js';
-import { coverUrl, getDb, loadPlays, loadTracks, transaction, upsertTrack } from './db.js';
-import { entryTrack, get, isMusicTrack, paginate, post } from './spotify.js';
+import { coverUrl, getDb, loadExcluded, loadPlays, loadTracks, transaction, upsertTrack } from './db.js';
+import { hasScope } from './auth.js';
+import { entryTrack, get, isMusicTrack, paginate, post, put } from './spotify.js';
 import { computeTrackStats } from './stats.js';
-import { groupTracks, loadRules, matchTracks, needsGenres } from './rules.js';
+import { groupTracks, loadRules, loadSettings, matchTracks, needsGenres } from './rules.js';
 
 const GENRE_CACHE_DAYS = 30;
 const PLAYLIST_DESCRIPTION = 'Kept up to date automatically by PlaylistPilot.';
+// auto_adds uses this in place of a playlist ID for songs saved to Liked Songs.
+export const LIKED = 'liked';
+// Spotify's limits per request.
+const PLAYLIST_BATCH = 100;
+const LIBRARY_BATCH = 40;
+// Most song lookups one apply will do, so a big history import can't stall it.
+const MAX_LOOKUPS = 300;
 
 async function playlistTrackIds(playlist) {
   const d = getDb();
@@ -30,11 +38,12 @@ async function playlistTrackIds(playlist) {
  * Spotify no longer lets dev-mode apps read playlists you only follow.
  */
 async function loadLibrary(me, managedIds) {
-  const saved = new Set();
+  const liked = new Set();
   for await (const entry of paginate('/me/tracks', { limit: 50 })) {
     const track = entryTrack(entry);
-    if (isMusicTrack(track)) saved.add(track.id);
+    if (isMusicTrack(track)) liked.add(track.id);
   }
+  const saved = new Set(liked);
 
   const playlists = [];
   for await (const playlist of paginate('/me/playlists', { limit: 50 })) {
@@ -44,12 +53,20 @@ async function loadLibrary(me, managedIds) {
     if (!readable || managedIds.has(playlist.id)) continue;
     for (const id of await playlistTrackIds(playlist)) saved.add(id);
   }
-  return { saved, playlists };
+  return { saved, liked, playlists };
 }
 
-/** Imported history only has names; look up the real artist IDs for tracks we care about. */
-async function fillMissingArtists(trackIds, tracks) {
-  const missing = trackIds.filter((id) => tracks.get(id).artistIds.length === 0);
+/**
+ * Imported history only has names and how long you listened. Look up the
+ * artists (for genres) and song length (for % listened) of tracks we care about.
+ */
+async function fillMissingDetails(trackIds, tracks, needs) {
+  const missing = trackIds
+    .filter((id) => {
+      const t = tracks.get(id);
+      return (needs.artists && t.artistIds.length === 0) || (needs.duration && !t.durationMs);
+    })
+    .slice(0, MAX_LOOKUPS);
   for (const id of missing) {
     const full = await get(`/tracks/${id}`);
     transaction((d) => upsertTrack(d, full));
@@ -59,8 +76,10 @@ async function fillMissingArtists(trackIds, tracks) {
       artistIds: full.artists.map((a) => a.id),
       artistNames: full.artists.map((a) => a.name),
       imageUrl: coverUrl(full),
+      durationMs: full.duration_ms,
     });
   }
+  return missing.length;
 }
 
 async function loadGenres(artistIds) {
@@ -106,26 +125,56 @@ async function ensurePlaylist(name, playlists, meId) {
   return playlist;
 }
 
+const addedTo = (playlistId) =>
+  new Set(getDb().prepare('SELECT track_id FROM auto_adds WHERE playlist_id = ?').all(playlistId).map((r) => r.track_id));
+
+function rememberAdded(playlistId, trackIds, ruleName) {
+  transaction((d) => {
+    const insert = d.prepare('INSERT OR IGNORE INTO auto_adds (playlist_id, track_id, rule, added_at) VALUES (?, ?, ?, ?)');
+    const now = new Date().toISOString();
+    for (const id of trackIds) insert.run(playlistId, id, ruleName, now);
+  });
+}
+
+const uris = (ids) => ids.map((id) => `spotify:track:${id}`);
+
 export async function applyRules({ dryRun = false, log = console.log } = {}) {
   const rules = loadRules(config.rulesPath);
+  const settings = loadSettings(config.rulesPath);
   const d = getDb();
-  const stats = computeTrackStats(loadPlays());
+  let stats = computeTrackStats(loadPlays());
   if (stats.size === 0) {
     log('No plays recorded yet. Run `npm run sync` (or import your history) first.');
     return [];
   }
+  if (!dryRun && rules.some((r) => r.saveTo === 'liked') && !hasScope('user-library-modify')) {
+    throw new Error('Reconnect Spotify so PlaylistPilot can save songs to Liked Songs.');
+  }
 
   const me = await get('/me');
   const managedIds = new Set(d.prepare('SELECT id FROM managed_playlists').all().map((r) => r.id));
-  const { saved, playlists } = await loadLibrary(me, managedIds);
+  const { saved, liked, playlists } = await loadLibrary(me, managedIds);
   const tracks = loadTracks();
-  const ctx = { stats, tracks, saved, now: Date.now(), genresByArtist: new Map() };
-  const summary = [];
+  const ctx = { stats, tracks, saved, excluded: loadExcluded(), settings, now: Date.now(), genresByArtist: new Map() };
 
+  // Imported plays need the song's length before "% listened" can be judged.
+  const lengthBound = rules.flatMap((r) => r.conditions).filter((c) => c.minCompletion);
+  if (lengthBound.length) {
+    const fewest = Math.min(...lengthBound.map((c) => c.minPlays ?? 1));
+    const needLength = [...stats.values()]
+      .filter((s) => s.plays >= fewest && s.listens.some((l) => l.listenedMs != null && !l.durationMs))
+      .map((s) => s.trackId);
+    if (await fillMissingDetails(needLength, tracks, { duration: true })) {
+      stats = computeTrackStats(loadPlays());
+      ctx.stats = stats;
+    }
+  }
+
+  const summary = [];
   for (const rule of rules) {
     if (needsGenres(rule)) {
       const candidates = matchTracks(rule, { ...ctx, ignoreGenres: true });
-      await fillMissingArtists(candidates, tracks);
+      await fillMissingDetails(candidates, tracks, { artists: true });
       const artistIds = [...new Set(candidates.flatMap((id) => tracks.get(id).artistIds))];
       for (const [id, g] of await loadGenres(artistIds)) ctx.genresByArtist.set(id, g);
     }
@@ -134,26 +183,38 @@ export async function applyRules({ dryRun = false, log = console.log } = {}) {
       const result = { rule: rule.name, playlist: group.playlist, matched: group.trackIds.length, added: [] };
       summary.push(result);
 
+      if (rule.saveTo === 'liked') {
+        const before = addedTo(LIKED);
+        const toAdd = group.trackIds.filter((id) => !liked.has(id) && !before.has(id));
+        if (!dryRun) {
+          for (let i = 0; i < toAdd.length; i += LIBRARY_BATCH) {
+            const chunk = toAdd.slice(i, i + LIBRARY_BATCH);
+            await put('/me/library', { uris: uris(chunk).join(',') });
+            rememberAdded(LIKED, chunk, rule.name);
+            for (const id of chunk) liked.add(id);
+          }
+        }
+        result.added = toAdd;
+        continue;
+      }
+
       if (dryRun) {
-        result.added = group.trackIds;
+        // Only show what would be new: skip songs already added to this playlist before.
+        const managed = d.prepare('SELECT id FROM managed_playlists WHERE name = ?').get(group.playlist);
+        const before = managed ? addedTo(managed.id) : new Set();
+        result.added = group.trackIds.filter((id) => !before.has(id));
         continue;
       }
 
       const playlist = await ensurePlaylist(group.playlist, playlists, me.id);
       const current = await playlistTrackIds(playlist);
-      const alreadyAdded = new Set(
-        d.prepare('SELECT track_id FROM auto_adds WHERE playlist_id = ?').all(playlist.id).map((r) => r.track_id),
-      );
-      const toAdd = group.trackIds.filter((id) => !current.has(id) && !alreadyAdded.has(id));
+      const before = addedTo(playlist.id);
+      const toAdd = group.trackIds.filter((id) => !current.has(id) && !before.has(id));
 
-      for (let i = 0; i < toAdd.length; i += 100) {
-        const chunk = toAdd.slice(i, i + 100);
-        await post(`/playlists/${playlist.id}/items`, { uris: chunk.map((id) => `spotify:track:${id}`) });
-        transaction(() => {
-          const insert = d.prepare('INSERT OR IGNORE INTO auto_adds (playlist_id, track_id, rule, added_at) VALUES (?, ?, ?, ?)');
-          const now = new Date().toISOString();
-          for (const id of chunk) insert.run(playlist.id, id, rule.name, now);
-        });
+      for (let i = 0; i < toAdd.length; i += PLAYLIST_BATCH) {
+        const chunk = toAdd.slice(i, i + PLAYLIST_BATCH);
+        await post(`/playlists/${playlist.id}/items`, { uris: uris(chunk) });
+        rememberAdded(playlist.id, chunk, rule.name);
       }
       result.added = toAdd;
     }

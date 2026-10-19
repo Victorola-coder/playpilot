@@ -1,8 +1,27 @@
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
-import { playsWithinDays } from './stats.js';
+import { countListens } from './stats.js';
 
-const CONDITION_KEYS = new Set(['minPlays', 'withinDays', 'minStreak', 'artists', 'genres']);
+const CONDITION_KEYS = new Set([
+  'minPlays',
+  'withinDays',
+  'minCompletion',
+  'minSessions',
+  'maxPerSession',
+  'minStreak',
+  'artists',
+  'genres',
+]);
 const GROUP_BY = new Set(['genre', 'artist']);
+const SAVE_TO = new Set(['playlist', 'liked']);
+
+export const DEFAULT_SETTINGS = {
+  // Listens of the same song further apart than this count as separate sessions.
+  sessionGapMinutes: 60,
+  // What to do with plays nobody measured, for rules that ask for a minimum % listened.
+  unmeasuredPlays: 'ignore',
+  // Let the background loop apply rules on its own.
+  autoApply: true,
+};
 
 function fail(ruleName, message) {
   throw new Error(`Rule "${ruleName}": ${message}`);
@@ -18,15 +37,21 @@ function normalizeCondition(ruleName, cond) {
     }
   }
   // An empty condition would match every song you've ever played.
-  if (!cond.minPlays && !cond.minStreak && !cond.artists?.length && !cond.genres?.length) {
+  if (!cond.minPlays && !cond.minSessions && !cond.minStreak && !cond.artists?.length && !cond.genres?.length) {
     fail(ruleName, 'each condition needs at least a play count, a streak, artists or genres.');
   }
-  for (const key of ['minPlays', 'withinDays', 'minStreak']) {
+  for (const key of ['minPlays', 'withinDays', 'minSessions', 'maxPerSession', 'minStreak']) {
     if (key in cond && !(Number.isInteger(cond[key]) && cond[key] > 0)) {
       fail(ruleName, `"${key}" must be a whole number above 0.`);
     }
   }
-  if (cond.withinDays && !cond.minPlays) fail(ruleName, '"withinDays" needs "minPlays" alongside it.');
+  if ('minCompletion' in cond && !(Number.isInteger(cond.minCompletion) && cond.minCompletion >= 1 && cond.minCompletion <= 100)) {
+    fail(ruleName, '"minCompletion" must be a percentage from 1 to 100.');
+  }
+  const countsListens = cond.minPlays || cond.minSessions;
+  for (const key of ['withinDays', 'minCompletion', 'maxPerSession']) {
+    if (cond[key] && !countsListens) fail(ruleName, `"${key}" needs "minPlays" or "minSessions" alongside it.`);
+  }
   for (const key of ['artists', 'genres']) {
     if (key in cond && !(Array.isArray(cond[key]) && cond[key].every((v) => typeof v === 'string'))) {
       fail(ruleName, `"${key}" must be a list of names, e.g. ["Burna Boy"].`);
@@ -51,7 +76,12 @@ export function normalizeRules(raw) {
       if (!name || typeof name !== 'string') throw new Error('Every rule needs a "name".');
       if (seen.has(name)) fail(name, 'two rules have this name; names must be unique.');
       seen.add(name);
-      if (!rule.playlist || typeof rule.playlist !== 'string') fail(name, 'needs a "playlist" name.');
+      const saveTo = rule.saveTo ?? 'playlist';
+      if (!SAVE_TO.has(saveTo)) fail(name, '"saveTo" must be "playlist" or "liked".');
+      if (saveTo === 'liked' && rule.groupBy) fail(name, 'songs saved to Liked Songs can\'t be split into groups.');
+      if (saveTo === 'playlist' && (!rule.playlist || typeof rule.playlist !== 'string')) {
+        fail(name, 'needs a "playlist" name.');
+      }
       if (!rule.match) fail(name, 'needs a "match" section saying which songs to pick.');
       if (rule.groupBy && !GROUP_BY.has(rule.groupBy)) fail(name, '"groupBy" must be "genre" or "artist".');
       for (const key of ['minGroupSize', 'maxTracks']) {
@@ -60,7 +90,7 @@ export function normalizeRules(raw) {
         }
       }
 
-      let playlist = rule.playlist;
+      let playlist = saveTo === 'liked' ? 'Liked Songs' : rule.playlist;
       if (rule.groupBy && !playlist.includes('{group}')) playlist += ' · {group}';
       if (!rule.groupBy && playlist.includes('{group}')) fail(name, '"{group}" in the playlist name needs "groupBy".');
 
@@ -68,6 +98,7 @@ export function normalizeRules(raw) {
       return {
         name,
         playlist,
+        saveTo,
         conditions,
         groupBy: rule.groupBy ?? null,
         onlyUnsaved: rule.onlyUnsaved ?? true,
@@ -93,8 +124,30 @@ export function loadRules(file) {
   return normalizeRules(readRawRules(file));
 }
 
-/** Validates every rule (including switched-off ones) and writes the file. Throws on the first problem. */
+export function normalizeSettings(raw = {}) {
+  const settings = { ...DEFAULT_SETTINGS, ...raw };
+  if (!(Number.isInteger(settings.sessionGapMinutes) && settings.sessionGapMinutes > 0)) {
+    throw new Error('Settings: "sessionGapMinutes" must be a whole number above 0.');
+  }
+  if (!['ignore', 'count'].includes(settings.unmeasuredPlays)) {
+    throw new Error('Settings: "unmeasuredPlays" must be "ignore" or "count".');
+  }
+  if (typeof settings.autoApply !== 'boolean') throw new Error('Settings: "autoApply" must be true or false.');
+  return settings;
+}
+
+/** The "settings" section of rules.json. Falls back to defaults rather than failing. */
+export function loadSettings(file) {
+  try {
+    return normalizeSettings(existsSync(file) ? readRawRules(file).settings : undefined);
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+/** Validates everything (including switched-off rules) and writes the file. Throws on the first problem. */
 export function saveRules(file, raw) {
+  normalizeSettings(raw?.settings);
   normalizeRules({ rules: (raw?.rules ?? []).map((rule) => ({ ...rule, enabled: true })) });
   writeFileSync(file, `${JSON.stringify(raw, null, 2)}\n`);
 }
@@ -106,9 +159,18 @@ function trackGenres(track, genresByArtist) {
 }
 
 function matchesCondition(cond, stat, track, ctx) {
-  if (cond.minPlays) {
-    const count = cond.withinDays ? playsWithinDays(stat, cond.withinDays, ctx.now) : stat.plays;
-    if (count < cond.minPlays) return false;
+  if (cond.minPlays || cond.minSessions) {
+    const settings = ctx.settings ?? DEFAULT_SETTINGS;
+    const { count, sessions } = countListens(stat, {
+      minCompletion: cond.minCompletion,
+      withinDays: cond.withinDays,
+      maxPerSession: cond.maxPerSession,
+      unmeasured: settings.unmeasuredPlays,
+      sessionGapMs: settings.sessionGapMinutes * 60_000,
+      now: ctx.now,
+    });
+    if (cond.minPlays && count < cond.minPlays) return false;
+    if (cond.minSessions && sessions < cond.minSessions) return false;
   }
   if (cond.minStreak && stat.bestStreak < cond.minStreak) return false;
   if (cond.artists && !track.artistNames.some((a) => cond.artists.includes(a.toLowerCase()))) return false;
@@ -130,6 +192,7 @@ export function matchTracks(rule, ctx) {
     const track = ctx.tracks.get(trackId);
     if (!track) continue;
     if (rule.onlyUnsaved && ctx.saved.has(trackId)) continue;
+    if (ctx.excluded?.has(trackId)) continue;
     if (rule.conditions.some((cond) => matchesCondition(cond, stat, track, ctx))) picked.push(trackId);
   }
   picked.sort((a, b) => ctx.stats.get(b).plays - ctx.stats.get(a).plays || ctx.stats.get(b).lastPlayed - ctx.stats.get(a).lastPlayed);

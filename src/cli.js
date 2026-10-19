@@ -5,6 +5,7 @@ import { importHistory, syncRecentPlays } from './sync.js';
 import { applyRules } from './apply.js';
 import { computeTrackStats, playsWithinDays } from './stats.js';
 import { loadPlays, loadTracks } from './db.js';
+import { startBackground } from './background.js';
 
 const HELP = `PlaylistPilot - auto-save the songs you keep replaying
 
@@ -15,7 +16,7 @@ Usage: node src/cli.js <command>
   import <path>      Load your Spotify "Extended streaming history" export
   apply [--dry-run]  Run rules.json and add matching songs to playlists
   stats              Show your most-played songs
-  run                Keep running: sync every ${config.syncMinutes} min, apply every ${config.applyMinutes} min
+  run                Keep running: measure listens, sync every ${config.syncMinutes} min, apply every ${config.applyMinutes} min
 `;
 
 const stamp = () => new Date().toLocaleTimeString();
@@ -38,22 +39,9 @@ function showStats() {
   }
 }
 
-async function runForever() {
-  const safely = (fn) => async () => {
-    try {
-      await fn();
-    } catch (err) {
-      console.error(`[${stamp()}] ${err.message}`);
-    }
-  };
-  const doSync = safely(sync);
-  const doApply = safely(() => applyRules());
-
-  console.log('PlaylistPilot is running. Press Ctrl+C to stop.');
-  await doSync();
-  await doApply();
-  setInterval(doSync, config.syncMinutes * 60_000);
-  setInterval(doApply, config.applyMinutes * 60_000);
+function runForever() {
+  console.log('PlaylistPilot is running. It measures what you play and applies your rules. Press Ctrl+C to stop.');
+  startBackground({ log: (line) => console.log(`[${stamp()}] ${line}`) });
 }
 
 const [command, ...args] = process.argv.slice(2);
@@ -80,7 +68,7 @@ try {
       showStats();
       break;
     case 'run':
-      await runForever();
+      runForever();
       break;
     default:
       console.log(HELP);

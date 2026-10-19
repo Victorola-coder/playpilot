@@ -5,12 +5,21 @@ import { config } from './config.js';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS plays (
-    played_at TEXT NOT NULL,          -- ISO 8601, always toISOString() format
-    track_id  TEXT NOT NULL,
-    source    TEXT NOT NULL,          -- 'recent' (live tracking) or 'import' (Spotify data export)
+    played_at         TEXT NOT NULL,  -- ISO 8601, always toISOString() format
+    track_id          TEXT NOT NULL,
+    source            TEXT NOT NULL,  -- 'recent' (Spotify's recently played), 'live' (measured by the tracker) or 'import'
+    listened_ms       INTEGER,        -- how much was actually heard; NULL when nobody measured it
+    duration_ms       INTEGER,        -- song length at the time of the play
+    spotify_played_at TEXT,           -- the timestamp Spotify reported, once this play shows up in recently played
     PRIMARY KEY (played_at, track_id)
   );
   CREATE INDEX IF NOT EXISTS plays_by_track ON plays (track_id);
+
+  -- Songs you never want added automatically.
+  CREATE TABLE IF NOT EXISTS excluded_tracks (
+    track_id    TEXT PRIMARY KEY,
+    excluded_at TEXT NOT NULL
+  );
 
   CREATE TABLE IF NOT EXISTS tracks (
     id           TEXT PRIMARY KEY,
@@ -57,8 +66,19 @@ const SCHEMA = `
 
 // Columns added after the first release. CREATE TABLE IF NOT EXISTS won't add them to an existing database.
 function migrate(d) {
-  const trackColumns = d.prepare('PRAGMA table_info(tracks)').all().map((c) => c.name);
-  if (!trackColumns.includes('image_url')) d.exec('ALTER TABLE tracks ADD COLUMN image_url TEXT');
+  const columns = (table) => d.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!columns('tracks').includes('image_url')) d.exec('ALTER TABLE tracks ADD COLUMN image_url TEXT');
+
+  const playColumns = columns('plays');
+  if (!playColumns.includes('listened_ms')) {
+    d.exec(`
+      ALTER TABLE plays ADD COLUMN listened_ms INTEGER;
+      ALTER TABLE plays ADD COLUMN duration_ms INTEGER;
+      ALTER TABLE plays ADD COLUMN spotify_played_at TEXT;
+      UPDATE plays SET spotify_played_at = played_at WHERE source = 'recent';
+    `);
+  }
+  d.exec('CREATE INDEX IF NOT EXISTS plays_by_spotify_time ON plays (track_id, spotify_played_at)');
 }
 
 let db;
@@ -122,6 +142,10 @@ export function upsertTrack(d, track) {
   }
 }
 
+export function loadExcluded() {
+  return new Set(getDb().prepare('SELECT track_id FROM excluded_tracks').all().map((r) => r.track_id));
+}
+
 export function loadTracks() {
   const tracks = new Map();
   for (const row of getDb().prepare('SELECT * FROM tracks').all()) {
@@ -131,6 +155,7 @@ export function loadTracks() {
       artistIds: JSON.parse(row.artist_ids || '[]'),
       artistNames: JSON.parse(row.artist_names || '[]'),
       imageUrl: row.image_url,
+      durationMs: row.duration_ms,
     });
   }
   return tracks;
@@ -138,7 +163,16 @@ export function loadTracks() {
 
 export function loadPlays() {
   return getDb()
-    .prepare('SELECT track_id, played_at FROM plays ORDER BY played_at')
+    .prepare(`
+      SELECT p.track_id, p.played_at, p.listened_ms, COALESCE(p.duration_ms, t.duration_ms) AS duration_ms
+      FROM plays p LEFT JOIN tracks t ON t.id = p.track_id
+      ORDER BY p.played_at
+    `)
     .all()
-    .map((row) => ({ trackId: row.track_id, playedAt: Date.parse(row.played_at) }));
+    .map((row) => ({
+      trackId: row.track_id,
+      playedAt: Date.parse(row.played_at),
+      listenedMs: row.listened_ms,
+      durationMs: row.duration_ms,
+    }));
 }

@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { get, isMusicTrack } from './spotify.js';
 import { getDb, kvGet, kvSet, transaction, upsertTrack } from './db.js';
+import { claimRecentPlay } from './tracker.js';
 
 // Spotify itself only counts a stream after 30 seconds; we use the same bar for imports.
 const MIN_IMPORT_MS = 30_000;
@@ -22,11 +23,15 @@ export async function syncRecentPlays() {
   let newest = lastSeen;
 
   transaction((d) => {
-    const insert = d.prepare("INSERT OR IGNORE INTO plays (played_at, track_id, source) VALUES (?, ?, 'recent')");
+    const insert = d.prepare(
+      "INSERT OR IGNORE INTO plays (played_at, track_id, source, spotify_played_at) VALUES (?, ?, 'recent', ?)",
+    );
     for (const { track, played_at } of items) {
       const playedAt = new Date(played_at).toISOString();
       upsertTrack(d, track);
-      added += insert.run(playedAt, track.id).changes;
+      if (!claimRecentPlay(d, track.id, playedAt, track.duration_ms)) {
+        added += insert.run(playedAt, track.id, playedAt).changes;
+      }
       if (!newest || playedAt > newest) newest = playedAt;
     }
   });
@@ -55,12 +60,15 @@ export function importHistory(target) {
   }
 
   const d = getDb();
-  const earliestLive = d.prepare("SELECT MIN(played_at) AS t FROM plays WHERE source = 'recent'").get().t;
+  const earliestLive = d.prepare("SELECT MIN(played_at) AS t FROM plays WHERE source IN ('recent', 'live')").get().t;
   let imported = 0;
   let skipped = 0;
 
   transaction(() => {
-    const insertPlay = d.prepare("INSERT OR IGNORE INTO plays (played_at, track_id, source) VALUES (?, ?, 'import')");
+    // The export says how long each play lasted, so imported plays count as measured.
+    const insertPlay = d.prepare(
+      "INSERT OR IGNORE INTO plays (played_at, track_id, source, listened_ms) VALUES (?, ?, 'import', ?)",
+    );
     const insertTrack = d.prepare(
       "INSERT OR IGNORE INTO tracks (id, name, artist_ids, artist_names) VALUES (?, ?, '[]', ?)",
     );
@@ -79,7 +87,7 @@ export function importHistory(target) {
         const trackId = uri.slice('spotify:track:'.length);
         const artist = entry.master_metadata_album_artist_name;
         insertTrack.run(trackId, entry.master_metadata_track_name, JSON.stringify(artist ? [artist] : []));
-        imported += insertPlay.run(playedAt, trackId).changes;
+        imported += insertPlay.run(playedAt, trackId, entry.ms_played).changes;
       }
     }
   });
