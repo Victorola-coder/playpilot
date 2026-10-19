@@ -56,7 +56,10 @@ export function completion(listen) {
  *
  * Returns { count, sessions }.
  */
-export function countListens(stat, { minCompletion, withinDays, maxPerSession, unmeasured = 'ignore', sessionGapMs, now = Date.now() }) {
+export function countListens(
+  stat,
+  { minCompletion = 0, withinDays = 0, maxPerSession = Infinity, unmeasured = 'ignore', sessionGapMs, now = Date.now() },
+) {
   const cutoff = withinDays ? now - withinDays * DAY_MS : -Infinity;
   const kept = stat.listens.filter((l) => {
     if (l.at < cutoff) return false;
@@ -72,6 +75,6 @@ export function countListens(stat, { minCompletion, withinDays, maxPerSession, u
     sessionSizes[sessionSizes.length - 1]++;
     previous = l.at;
   }
-  const count = sessionSizes.reduce((sum, size) => sum + Math.min(size, maxPerSession ?? Infinity), 0);
+  const count = sessionSizes.reduce((sum, size) => sum + Math.min(size, maxPerSession), 0);
   return { count, sessions: sessionSizes.length };
 }
