@@ -17,7 +17,8 @@ const SCHEMA = `
     name         TEXT,
     artist_ids   TEXT,                -- JSON array; empty for imported tracks until looked up
     artist_names TEXT,                -- JSON array
-    duration_ms  INTEGER
+    duration_ms  INTEGER,
+    image_url    TEXT                 -- album cover, ~300px
   );
 
   CREATE TABLE IF NOT EXISTS artists (
@@ -54,6 +55,12 @@ const SCHEMA = `
   );
 `;
 
+// Columns added after the first release. CREATE TABLE IF NOT EXISTS won't add them to an existing database.
+function migrate(d) {
+  const trackColumns = d.prepare('PRAGMA table_info(tracks)').all().map((c) => c.name);
+  if (!trackColumns.includes('image_url')) d.exec('ALTER TABLE tracks ADD COLUMN image_url TEXT');
+}
+
 let db;
 
 export function getDb() {
@@ -62,6 +69,7 @@ export function getDb() {
   db = new DatabaseSync(config.dbPath);
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 
@@ -89,18 +97,25 @@ export function transaction(fn) {
   }
 }
 
+// Spotify lists covers largest first (640, 300, 64); 300px looks sharp at thumbnail size.
+export function coverUrl(track) {
+  const images = track.album?.images ?? [];
+  return (images[1] ?? images[0])?.url ?? null;
+}
+
 export function upsertTrack(d, track) {
   d.prepare(`
-    INSERT INTO tracks (id, name, artist_ids, artist_names, duration_ms) VALUES (?, ?, ?, ?, ?)
+    INSERT INTO tracks (id, name, artist_ids, artist_names, duration_ms, image_url) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name, artist_ids = excluded.artist_ids,
-      artist_names = excluded.artist_names, duration_ms = excluded.duration_ms
+      name = excluded.name, artist_ids = excluded.artist_ids, artist_names = excluded.artist_names,
+      duration_ms = excluded.duration_ms, image_url = excluded.image_url
   `).run(
     track.id,
     track.name,
     JSON.stringify(track.artists.map((a) => a.id)),
     JSON.stringify(track.artists.map((a) => a.name)),
     track.duration_ms ?? null,
+    coverUrl(track),
   );
   for (const artist of track.artists) {
     d.prepare('INSERT OR IGNORE INTO artists (id, name) VALUES (?, ?)').run(artist.id, artist.name);
@@ -115,6 +130,7 @@ export function loadTracks() {
       name: row.name,
       artistIds: JSON.parse(row.artist_ids || '[]'),
       artistNames: JSON.parse(row.artist_names || '[]'),
+      imageUrl: row.image_url,
     });
   }
   return tracks;

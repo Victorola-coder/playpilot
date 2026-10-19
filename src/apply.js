@@ -1,5 +1,5 @@
 import { config } from './config.js';
-import { getDb, loadPlays, loadTracks, transaction, upsertTrack } from './db.js';
+import { coverUrl, getDb, loadPlays, loadTracks, transaction, upsertTrack } from './db.js';
 import { entryTrack, get, isMusicTrack, paginate, post } from './spotify.js';
 import { computeTrackStats } from './stats.js';
 import { groupTracks, loadRules, matchTracks, needsGenres } from './rules.js';
@@ -53,7 +53,13 @@ async function fillMissingArtists(trackIds, tracks) {
   for (const id of missing) {
     const full = await get(`/tracks/${id}`);
     transaction((d) => upsertTrack(d, full));
-    tracks.set(id, { id, name: full.name, artistIds: full.artists.map((a) => a.id), artistNames: full.artists.map((a) => a.name) });
+    tracks.set(id, {
+      id,
+      name: full.name,
+      artistIds: full.artists.map((a) => a.id),
+      artistNames: full.artists.map((a) => a.name),
+      imageUrl: coverUrl(full),
+    });
   }
 }
 
