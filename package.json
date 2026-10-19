@@ -1,0 +1,22 @@
+{
+  "name": "playpilot",
+  "version": "0.1.0",
+  "description": "Tracks your Spotify listening and automatically saves the songs you keep replaying into playlists.",
+  "type": "module",
+  "bin": {
+    "playpilot": "src/cli.js"
+  },
+  "scripts": {
+    "login": "node --disable-warning=ExperimentalWarning src/cli.js login",
+    "sync": "node --disable-warning=ExperimentalWarning src/cli.js sync",
+    "apply": "node --disable-warning=ExperimentalWarning src/cli.js apply",
+    "preview": "node --disable-warning=ExperimentalWarning src/cli.js apply --dry-run",
+    "stats": "node --disable-warning=ExperimentalWarning src/cli.js stats",
+    "start": "node --disable-warning=ExperimentalWarning src/cli.js run",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "license": "MIT"
+}
