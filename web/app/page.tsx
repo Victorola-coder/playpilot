@@ -1,6 +1,7 @@
 import { getOverview, getPlaylists, getRules, getTopSongs, isLoggedIn } from '@/lib/playpilot';
 import Link from 'next/link';
 import { ActionsPanel } from './actions-panel';
+import { NowPlaying } from './now-playing';
 import { Topbar } from './topbar';
 import { Cover, Icon, timeAgo, trackUrl, type IconName } from './ui';
 
@@ -36,6 +37,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
             never lose one because you forgot to save it.
           </p>
         </section>
+
+        {loggedIn && <NowPlaying />}
 
         {!loggedIn && (
           <section className="card onboarding">

@@ -3,7 +3,9 @@ import { NextResponse } from 'next/server';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { ROOT, config } from '../../src/config.js';
-import { getDb, kvGet, kvSet, loadPlays, loadTracks } from '../../src/db.js';
+import { coverUrl, getDb, kvGet, kvSet, loadPlays, loadTracks } from '../../src/db.js';
+import { hasScope, isLoggedIn } from '../../src/auth.js';
+import { getNowPlaying } from '../../src/player.js';
 import { computeTrackStats, playsWithinDays } from '../../src/stats.js';
 import { loadRules, readRawRules, saveRules } from '../../src/rules.js';
 import type { RawRule } from './rules-draft';
@@ -183,4 +185,43 @@ export function getRawRules(): { rules: RawRule[]; error: string | null; isExamp
 
 export function saveRawRules(raw: { rules: RawRule[] }) {
   saveRules(config.rulesPath, raw);
+}
+
+export type NowPlaying =
+  | { status: 'disconnected' }
+  | { status: 'needs-permission' }
+  | { status: 'idle' }
+  | { status: 'error'; message: string }
+  | {
+      status: 'playing';
+      song: Song;
+      isPlaying: boolean;
+      progressMs: number;
+      durationMs: number;
+      plays: number;
+      bestStreak: number;
+    };
+
+type SpotifyTrack = { id: string; name: string; artists: { name: string }[]; album?: { images?: { url: string }[] } };
+
+export async function getNowPlayingInfo(): Promise<NowPlaying> {
+  if (!isLoggedIn()) return { status: 'disconnected' };
+  if (!hasScope('user-read-currently-playing')) return { status: 'needs-permission' };
+  try {
+    const now = await getNowPlaying();
+    if (!now) return { status: 'idle' };
+    const track = now.track as SpotifyTrack;
+    const stat = computeTrackStats(loadPlays()).get(track.id);
+    return {
+      status: 'playing',
+      song: { id: track.id, name: track.name, artists: track.artists.map((a) => a.name).join(', '), imageUrl: coverUrl(track) },
+      isPlaying: now.isPlaying,
+      progressMs: now.progressMs,
+      durationMs: now.durationMs,
+      plays: stat?.plays ?? 0,
+      bestStreak: stat?.bestStreak ?? 0,
+    };
+  } catch (err) {
+    return { status: 'error', message: (err as Error).message };
+  }
 }

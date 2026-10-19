@@ -7,6 +7,7 @@ import { kvGet, kvSet } from './db.js';
 const TOKEN_URL = 'https://accounts.spotify.com/api/token';
 const SCOPES = [
   'user-read-recently-played',
+  'user-read-currently-playing',
   'user-library-read',
   'playlist-read-private',
   'playlist-read-collaborative',
@@ -32,6 +33,8 @@ async function requestToken(params) {
     // Spotify may or may not rotate the refresh token; keep the old one if not.
     refreshToken: body.refresh_token || previous.refreshToken,
     expiresAt: Date.now() + body.expires_in * 1000,
+    // Space-separated permissions the user actually granted; kept across refreshes.
+    scope: body.scope ?? previous.scope ?? '',
   };
   kvSet('auth', auth);
   return auth;
@@ -48,6 +51,9 @@ export async function getAccessToken() {
 }
 
 export const isLoggedIn = () => Boolean(kvGet('auth')?.refreshToken);
+
+/** False when the account was connected before PlayPilot asked for this permission. */
+export const hasScope = (scope) => (kvGet('auth')?.scope ?? '').split(' ').includes(scope);
 
 /** Builds the Spotify consent URL. Keep `verifier` and `state` until the callback. */
 export function startLogin(redirectUri = config.redirectUri) {
