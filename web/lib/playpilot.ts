@@ -6,13 +6,16 @@ import { ROOT, config } from '../../src/config.js';
 import { coverUrl, getDb, kvGet, kvSet, loadPlays, loadTracks } from '../../src/db.js';
 import { hasScope, isLoggedIn } from '../../src/auth.js';
 import { getNowPlaying } from '../../src/player.js';
-import { computeTrackStats, playsWithinDays } from '../../src/stats.js';
-import { loadRules, readRawRules, saveRules } from '../../src/rules.js';
-import type { RawRule } from './rules-draft';
+import { completion, computeTrackStats, countListens, playsWithinDays } from '../../src/stats.js';
+import { loadRules, loadSettings, readRawRules, saveRules } from '../../src/rules.js';
+import { listExcluded, placesAdded } from '../../src/collection.js';
+import { unmeasuredShare } from '../../src/tracker.js';
+import type { RawFile, RawRule, RawSettings } from './rules-draft';
 
 export { isLoggedIn, startLogin, finishLogin } from '../../src/auth.js';
 export { syncRecentPlays } from '../../src/sync.js';
 export { applyRules } from '../../src/apply.js';
+export { allowTrack, excludeTrack, removeFromCollection } from '../../src/collection.js';
 
 // Holds the PKCE verifier and state between /api/auth/login and the callback.
 export const LOGIN_COOKIE = 'pp_login';
@@ -33,9 +36,20 @@ export function redirectTo(url: URL | string) {
 
 export type Song = { id: string; name: string; artists: string; imageUrl: string | null };
 
-export type TopSong = Song & { rank: number; plays: number; bestStreak: number; last30Days: number };
+export type TopSong = Song & {
+  rank: number;
+  plays: number;
+  bestStreak: number;
+  last30Days: number;
+  sessions: number;
+  /** Average % of the song heard across measured plays; null if none were measured. */
+  avgHeard: number | null;
+  excluded: boolean;
+  /** PlaylistPilot has put this song in a playlist or Liked Songs. */
+  added: boolean;
+};
 
-export type RuleIcon = 'repeat' | 'flame' | 'calendar' | 'tag';
+export type RuleIcon = 'repeat' | 'flame' | 'calendar' | 'tag' | 'heart' | 'check';
 
 export type RuleSummary = { name: string; playlist: string; description: string; icon: RuleIcon; chips: string[] };
 
@@ -53,6 +67,17 @@ export function getOverview() {
     songs: count('SELECT COUNT(DISTINCT track_id) AS n FROM plays'),
     autoAdded: count('SELECT COUNT(*) AS n FROM auto_adds'),
     latestPlay: (kvGet('lastPlayedAt') as string | undefined) ?? null,
+    ...unmeasuredShare(),
+  };
+}
+
+type Stat = { listens: { at: number; listenedMs: number | null; durationMs: number | null }[] };
+
+function listenSummary(stat: Stat, sessionGapMs: number) {
+  const heard = stat.listens.map(completion).filter((c): c is number => c !== null);
+  return {
+    sessions: countListens(stat, { sessionGapMs }).sessions,
+    avgHeard: heard.length ? Math.round((heard.reduce((a, b) => a + b, 0) / heard.length) * 100) : null,
   };
 }
 
@@ -77,6 +102,8 @@ export const SONGS_PER_PAGE = 10;
 /** One page of your most-played songs. `page` is 1-based and clamped to the valid range. */
 export function getTopSongs(page = 1) {
   const tracks = loadTracks();
+  const sessionGapMs = loadSettings(config.rulesPath).sessionGapMinutes * 60_000;
+  const excludedIds = new Set(listExcluded().map((e: { id: string }) => e.id));
   const all = [...computeTrackStats(loadPlays()).values()].sort(
     (a, b) => b.plays - a.plays || b.lastPlayed - a.lastPlayed,
   );
@@ -89,6 +116,9 @@ export function getTopSongs(page = 1) {
     plays: s.plays,
     bestStreak: s.bestStreak,
     last30Days: playsWithinDays(s, 30),
+    ...listenSummary(s, sessionGapMs),
+    excluded: excludedIds.has(s.trackId),
+    added: placesAdded(s.trackId).length > 0,
   }));
   return { songs, total: all.length, page: current, pages, maxPlays: all[0]?.plays ?? 1 };
 }
@@ -107,6 +137,9 @@ export function getPlaylists(): ManagedPlaylist[] {
 type Condition = {
   minPlays?: number;
   withinDays?: number;
+  minCompletion?: number;
+  minSessions?: number;
+  maxPerSession?: number;
   minStreak?: number;
   artists?: string[];
   genres?: string[];
@@ -117,7 +150,12 @@ const orList = (items: string[]) =>
 
 function describeCondition(c: Condition) {
   const parts: string[] = [];
-  if (c.minPlays) parts.push(`played ${c.minPlays}+ times${c.withinDays ? ` in the last ${c.withinDays} days` : ''}`);
+  if (c.minPlays) {
+    const listens = c.minCompletion ? `listened to ${c.minPlays}+ times (at least ${c.minCompletion}% each time)` : `played ${c.minPlays}+ times`;
+    parts.push(`${listens}${c.withinDays ? ` in the last ${c.withinDays} days` : ''}`);
+  }
+  if (c.minSessions) parts.push(`across ${c.minSessions}+ separate sessions`);
+  if (c.maxPerSession) parts.push(`counting at most ${c.maxPerSession} per session`);
   if (c.minStreak) parts.push(`played ${c.minStreak}+ times in a row`);
   if (c.artists) parts.push(`by ${orList(c.artists)}`);
   if (c.genres) parts.push(`in ${orList(c.genres)}`);
@@ -127,14 +165,19 @@ function describeCondition(c: Condition) {
 function conditionChip(c: Condition) {
   const parts: string[] = [];
   if (c.minPlays) parts.push(`${c.minPlays}+ plays${c.withinDays ? ` in ${c.withinDays}d` : ''}`);
+  if (c.minCompletion) parts.push(`${c.minCompletion}%+ heard`);
+  if (c.minSessions) parts.push(`${c.minSessions}+ sessions`);
+  if (c.maxPerSession) parts.push(`max ${c.maxPerSession}/session`);
   if (c.minStreak) parts.push(`${c.minStreak}+ in a row`);
   if (c.artists) parts.push(c.artists.length === 1 ? c.artists[0] : `${c.artists.length} artists`);
   if (c.genres) parts.push(c.genres.length === 1 ? c.genres[0] : `${c.genres.length} genres`);
   return parts.join(' + ');
 }
 
-function pickIcon(groupBy: string | null, conditions: Condition[]): RuleIcon {
+function pickIcon(saveTo: string, groupBy: string | null, conditions: Condition[]): RuleIcon {
+  if (saveTo === 'liked') return 'heart';
   if (groupBy) return 'tag';
+  if (conditions.some((c) => c.minCompletion || c.minSessions)) return 'check';
   if (conditions.some((c) => c.withinDays)) return 'calendar';
   if (conditions.every((c) => c.minStreak && !c.minPlays)) return 'repeat';
   return 'flame';
@@ -159,7 +202,7 @@ export function getRules(): { rules: RuleSummary[]; error: string | null } {
         name: rule.name,
         playlist: rule.playlist.replace('{group}', `<${rule.groupBy}>`),
         description: `${text}.`,
-        icon: pickIcon(rule.groupBy, conditions),
+        icon: pickIcon(rule.saveTo, rule.groupBy, conditions),
         chips,
       };
     });
@@ -170,21 +213,33 @@ export function getRules(): { rules: RuleSummary[]; error: string | null } {
 }
 
 /**
- * Rules as written in rules.json, for the settings form. Falls back to the
- * example rules when there's no rules.json yet; saving then creates it.
+ * rules.json as written, for the settings form. Falls back to the example
+ * rules when there's no rules.json yet; saving then creates it.
  */
-export function getRawRules(): { rules: RawRule[]; error: string | null; isExample: boolean } {
+export function getRawRules(): { rules: RawRule[]; settings: RawSettings; error: string | null; isExample: boolean } {
   const isExample = !existsSync(config.rulesPath);
   try {
     const raw = readRawRules(isExample ? path.join(ROOT, 'rules.example.json') : config.rulesPath);
-    return { rules: Array.isArray(raw?.rules) ? raw.rules : [], error: null, isExample };
+    return { rules: Array.isArray(raw?.rules) ? raw.rules : [], settings: raw?.settings ?? {}, error: null, isExample };
   } catch (err) {
-    return { rules: [], error: (err as Error).message, isExample };
+    return { rules: [], settings: {}, error: (err as Error).message, isExample };
   }
 }
 
-export function saveRawRules(raw: { rules: RawRule[] }) {
+export function saveRawRules(raw: RawFile) {
   saveRules(config.rulesPath, raw);
+}
+
+export type ExcludedSong = Song & { excludedAt: string };
+
+export function getExcluded(): ExcludedSong[] {
+  return listExcluded().map((e: { id: string; name: string | null; artistNames: string[]; imageUrl: string | null; excludedAt: string }) => ({
+    id: e.id,
+    name: e.name ?? 'Unknown song',
+    artists: e.artistNames.join(', '),
+    imageUrl: e.imageUrl,
+    excludedAt: e.excludedAt,
+  }));
 }
 
 export type NowPlaying =

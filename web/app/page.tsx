@@ -2,6 +2,7 @@ import { getOverview, getPlaylists, getRules, getTopSongs, isLoggedIn } from '@/
 import Link from 'next/link';
 import { ActionsPanel } from './actions-panel';
 import { NowPlaying } from './now-playing';
+import { SongMenu } from './song-menu';
 import { Topbar } from './topbar';
 import { Cover, Icon, timeAgo, trackUrl, type IconName } from './ui';
 
@@ -137,16 +138,29 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
             ) : (
               <ol className="songs">
                 {songs.map((song) => (
-                  <li key={song.id} className="song-row">
+                  <li key={song.id} className={song.excluded ? 'song-row excluded-row' : 'song-row'}>
                     <span className="rank">{song.rank}</span>
                     <Cover id={song.id} name={song.name} imageUrl={song.imageUrl} />
                     <div className="song-info">
                       <a href={trackUrl(song.id)} target="_blank" rel="noreferrer" className="song-name">
                         {song.name}
                       </a>
-                      <span className="muted small truncate">{song.artists}</span>
+                      <span className="muted small truncate">
+                        {[
+                          song.artists,
+                          `${song.sessions} session${song.sessions === 1 ? '' : 's'}`,
+                          song.avgHeard !== null ? `${song.avgHeard}% heard` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
                     </div>
                     <div className="song-meta">
+                      {song.excluded && (
+                        <span className="badge muted-badge" title="PlaylistPilot won't add this song">
+                          <Icon name="ban" size={12} /> Never add
+                        </span>
+                      )}
                       {song.bestStreak >= 3 && (
                         <span className="badge" title={`Played ${song.bestStreak} times in a row`}>
                           <Icon name="repeat" size={12} /> {song.bestStreak}×
@@ -158,6 +172,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
                           <span style={{ width: `${(song.plays / maxPlays) * 100}%` }} />
                         </span>
                       </div>
+                      <SongMenu trackId={song.id} name={song.name} excluded={song.excluded} added={song.added} />
                     </div>
                   </li>
                 ))}

@@ -8,19 +8,32 @@ import {
   fromDrafts,
   newRuleDraft,
   toDrafts,
+  toSettingsDraft,
   type ConditionDraft,
   type RawRule,
+  type RawSettings,
   type RuleDraft,
+  type SettingsDraft,
 } from '@/lib/rules-draft';
 
-export function RulesEditor({ initialRules, isExample }: { initialRules: RawRule[]; isExample: boolean }) {
+type Props = {
+  initialRules: RawRule[];
+  initialSettings: RawSettings;
+  isExample: boolean;
+  unmeasured: { total: number; unmeasured: number };
+};
+
+export function RulesEditor({ initialRules, initialSettings, isExample, unmeasured }: Props) {
   const [drafts, setDrafts] = useState(() => toDrafts(initialRules));
-  const [savedRules, setSavedRules] = useState(initialRules);
-  const [baseline, setBaseline] = useState(() => (isExample ? null : JSON.stringify(fromDrafts(toDrafts(initialRules)))));
+  const [settings, setSettings] = useState(() => toSettingsDraft(initialSettings));
+  const [saved, setSaved] = useState({ rules: initialRules, settings: initialSettings });
+  const [baseline, setBaseline] = useState(() =>
+    isExample ? null : JSON.stringify(fromDrafts(toDrafts(initialRules), toSettingsDraft(initialSettings))),
+  );
   const [status, setStatus] = useState<{ ok: boolean; message: string } | null>(null);
   const [saving, startSaving] = useTransition();
 
-  const serialized = useMemo(() => JSON.stringify(fromDrafts(drafts)), [drafts]);
+  const serialized = useMemo(() => JSON.stringify(fromDrafts(drafts, settings)), [drafts, settings]);
   const dirty = serialized !== baseline;
 
   // Warn before leaving the page with unsaved edits.
@@ -35,14 +48,19 @@ export function RulesEditor({ initialRules, isExample }: { initialRules: RawRule
     setDrafts((all) => all.map((d) => (d.key === key ? { ...d, ...patch } : d)));
     setStatus(null);
   };
+  const updateSettings = (patch: Partial<SettingsDraft>) => {
+    setSettings((s) => ({ ...s, ...patch }));
+    setStatus(null);
+  };
 
   const save = () =>
     startSaving(async () => {
-      const result = await saveRulesAction(fromDrafts(drafts));
+      const file = fromDrafts(drafts, settings);
+      const result = await saveRulesAction(file);
       setStatus(result);
       if (result.ok) {
         setBaseline(serialized);
-        setSavedRules(fromDrafts(drafts).rules);
+        setSaved({ rules: file.rules, settings: file.settings ?? {} });
       }
     });
 
@@ -54,7 +72,8 @@ export function RulesEditor({ initialRules, isExample }: { initialRules: RawRule
   }, [status]);
 
   const discard = () => {
-    setDrafts(toDrafts(savedRules));
+    setDrafts(toDrafts(saved.rules));
+    setSettings(toSettingsDraft(saved.settings));
     setStatus(null);
   };
 
@@ -66,7 +85,9 @@ export function RulesEditor({ initialRules, isExample }: { initialRules: RawRule
         </p>
       )}
 
-      <div className="card-head">
+      <ListeningSettings settings={settings} onChange={updateSettings} unmeasured={unmeasured} />
+
+      <div className="card-head section-head">
         <h2>Rules</h2>
         <span className="muted small">
           {drafts.filter((d) => d.enabled).length} of {drafts.length} on
@@ -127,6 +148,60 @@ export function RulesEditor({ initialRules, isExample }: { initialRules: RawRule
   );
 }
 
+function ListeningSettings({
+  settings,
+  onChange,
+  unmeasured,
+}: {
+  settings: SettingsDraft;
+  onChange: (patch: Partial<SettingsDraft>) => void;
+  unmeasured: Props['unmeasured'];
+}) {
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Listening</h2>
+      </div>
+      <p className="muted small">
+        PlaylistPilot watches what&rsquo;s playing while it&rsquo;s running and measures how much of each song you hear.
+        These settings apply to every rule.
+      </p>
+
+      <div className="condition-grid two">
+        <NumberField
+          label="New session after"
+          suffix="minutes apart"
+          value={settings.sessionGapMinutes}
+          placeholder="60"
+          hint="Listens of the same song closer together than this are one session."
+          onChange={(sessionGapMinutes) => onChange({ sessionGapMinutes })}
+        />
+        <Field
+          label="Plays PlaylistPilot couldn’t measure"
+          hint={
+            unmeasured.total
+              ? `${unmeasured.unmeasured} of your ${unmeasured.total} plays weren’t measured (for example, you played on your phone while PlaylistPilot was off). This only matters for rules with a minimum % listened.`
+              : 'For example, songs you played on your phone while PlaylistPilot was off. This only matters for rules with a minimum % listened.'
+          }
+        >
+          <select
+            value={settings.unmeasuredPlays}
+            onChange={(e) => onChange({ unmeasuredPlays: e.target.value as SettingsDraft['unmeasuredPlays'] })}
+          >
+            <option value="ignore">Don&rsquo;t count them</option>
+            <option value="count">Count them as full listens</option>
+          </select>
+        </Field>
+      </div>
+
+      <label className="checkbox">
+        <input type="checkbox" checked={settings.autoApply} onChange={(e) => onChange({ autoApply: e.target.checked })} />
+        Add songs automatically as soon as they qualify (checked every hour)
+      </label>
+    </section>
+  );
+}
+
 function RuleCard({
   draft,
   onChange,
@@ -138,6 +213,7 @@ function RuleCard({
 }) {
   const setCondition = (index: number, patch: Partial<ConditionDraft>) =>
     onChange({ conditions: draft.conditions.map((c, i) => (i === index ? { ...c, ...patch } : c)) });
+  const liked = draft.saveTo === 'liked';
 
   return (
     <section className={draft.enabled ? 'card rule-card' : 'card rule-card off'}>
@@ -159,66 +235,126 @@ function RuleCard({
         </button>
       </div>
 
-      <Field label="Playlist name" hint={draft.groupBy ? `Use {group} where the ${draft.groupBy} name should go.` : 'Renaming creates a new playlist next time rules are applied.'}>
-        <input value={draft.playlist} onChange={(e) => onChange({ playlist: e.target.value })} />
-      </Field>
+      <div className="condition-grid destination">
+        <Field label="Save songs to">
+          <select
+            value={draft.saveTo}
+            onChange={(e) => {
+              const saveTo = e.target.value as RuleDraft['saveTo'];
+              onChange(saveTo === 'liked' ? { saveTo, groupBy: '' } : { saveTo });
+            }}
+          >
+            <option value="playlist">A PlaylistPilot playlist</option>
+            <option value="liked">Liked Songs</option>
+          </select>
+        </Field>
+        {!liked && (
+          <Field
+            label="Playlist name"
+            hint={
+              draft.groupBy
+                ? `Use {group} where the ${draft.groupBy} name should go.`
+                : 'Renaming creates a new playlist next time rules are applied.'
+            }
+          >
+            <input value={draft.playlist} onChange={(e) => onChange({ playlist: e.target.value })} />
+          </Field>
+        )}
+      </div>
 
       <div className="field">
         <span className="field-label">Save songs that</span>
         <div className="conditions">
-          {draft.conditions.map((condition, i) => (
-            <div key={i} className="condition-wrap">
-              {i > 0 && <span className="or">or</span>}
-              <div className="condition">
-                <div className="condition-grid">
-                  <NumberField
-                    label="Played at least"
-                    suffix="times"
-                    value={condition.minPlays}
-                    onChange={(minPlays) => setCondition(i, { minPlays })}
-                  />
-                  <NumberField
-                    label="Within the last"
-                    suffix="days"
-                    placeholder="All time"
-                    value={condition.withinDays}
-                    disabled={!condition.minPlays}
-                    onChange={(withinDays) => setCondition(i, { withinDays })}
-                  />
-                  <NumberField
-                    label="In a row at least"
-                    suffix="times"
-                    value={condition.minStreak}
-                    onChange={(minStreak) => setCondition(i, { minStreak })}
-                  />
-                </div>
-                <div className="condition-grid two">
-                  <Field label="By artists" hint="Comma-separated. Leave blank for any artist.">
-                    <input
-                      value={condition.artists}
-                      placeholder="Burna Boy, Tems"
-                      onChange={(e) => setCondition(i, { artists: e.target.value })}
+          {draft.conditions.map((condition, i) => {
+            const counts = Boolean(condition.minPlays.trim() || condition.minSessions.trim());
+            return (
+              <div key={i} className="condition-wrap">
+                {i > 0 && <span className="or">or</span>}
+                <div className="condition">
+                  <span className="condition-group-label">How much you listened</span>
+                  <div className="condition-grid">
+                    <NumberField
+                      label="Listened at least"
+                      suffix="times"
+                      value={condition.minPlays}
+                      onChange={(minPlays) => setCondition(i, { minPlays })}
                     />
-                  </Field>
-                  <Field label="In genres" hint="Partial matches count: “afro” matches “afrobeats”.">
-                    <input
-                      value={condition.genres}
-                      placeholder="afrobeats, alte"
-                      onChange={(e) => setCondition(i, { genres: e.target.value })}
+                    <NumberField
+                      label="Each time hearing"
+                      suffix="% or more"
+                      placeholder="Any"
+                      value={condition.minCompletion}
+                      disabled={!counts}
+                      max={100}
+                      onChange={(minCompletion) => setCondition(i, { minCompletion })}
                     />
-                  </Field>
+                    <NumberField
+                      label="Within the last"
+                      suffix="days"
+                      placeholder="All time"
+                      value={condition.withinDays}
+                      disabled={!counts}
+                      onChange={(withinDays) => setCondition(i, { withinDays })}
+                    />
+                  </div>
+
+                  <span className="condition-group-label">Spread over time</span>
+                  <div className="condition-grid">
+                    <NumberField
+                      label="Across at least"
+                      suffix="sessions"
+                      placeholder="Any"
+                      value={condition.minSessions}
+                      hint="Stops one long sitting from counting as a favourite."
+                      onChange={(minSessions) => setCondition(i, { minSessions })}
+                    />
+                    <NumberField
+                      label="Count at most"
+                      suffix="per session"
+                      placeholder="No limit"
+                      value={condition.maxPerSession}
+                      disabled={!counts}
+                      hint="Plays beyond this in one sitting are ignored."
+                      onChange={(maxPerSession) => setCondition(i, { maxPerSession })}
+                    />
+                    <NumberField
+                      label="In a row at least"
+                      suffix="times"
+                      placeholder="Any"
+                      value={condition.minStreak}
+                      onChange={(minStreak) => setCondition(i, { minStreak })}
+                    />
+                  </div>
+
+                  <span className="condition-group-label">Which songs</span>
+                  <div className="condition-grid two">
+                    <Field label="By artists" hint="Comma-separated. Leave blank for any artist.">
+                      <input
+                        value={condition.artists}
+                        placeholder="Burna Boy, Tems"
+                        onChange={(e) => setCondition(i, { artists: e.target.value })}
+                      />
+                    </Field>
+                    <Field label="In genres" hint="Partial matches count: “afro” matches “afrobeats”.">
+                      <input
+                        value={condition.genres}
+                        placeholder="afrobeats, alte"
+                        onChange={(e) => setCondition(i, { genres: e.target.value })}
+                      />
+                    </Field>
+                  </div>
+                  {draft.conditions.length > 1 && (
+                    <button
+                      className="link-button"
+                      onClick={() => onChange({ conditions: draft.conditions.filter((_, j) => j !== i) })}
+                    >
+                      Remove this condition
+                    </button>
+                  )}
                 </div>
-                {draft.conditions.length > 1 && (
-                  <button
-                    className="link-button"
-                    onClick={() => onChange({ conditions: draft.conditions.filter((_, j) => j !== i) })}
-                  >
-                    Remove this condition
-                  </button>
-                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
           <button
             className="link-button add-condition"
             onClick={() => onChange({ conditions: [...draft.conditions, emptyCondition()] })}
@@ -239,22 +375,24 @@ function RuleCard({
         </label>
 
         <div className="condition-grid">
-          <Field label="Split into playlists by">
-            <select
-              value={draft.groupBy}
-              onChange={(e) => {
-                const groupBy = e.target.value as RuleDraft['groupBy'];
-                const playlist =
-                  groupBy && !draft.playlist.includes('{group}') ? `${draft.playlist} · {group}` : draft.playlist;
-                onChange({ groupBy, playlist });
-              }}
-            >
-              <option value="">Don&rsquo;t split</option>
-              <option value="genre">Genre</option>
-              <option value="artist">Artist</option>
-            </select>
-          </Field>
-          {draft.groupBy && (
+          {!liked && (
+            <Field label="Split into playlists by">
+              <select
+                value={draft.groupBy}
+                onChange={(e) => {
+                  const groupBy = e.target.value as RuleDraft['groupBy'];
+                  const playlist =
+                    groupBy && !draft.playlist.includes('{group}') ? `${draft.playlist} · {group}` : draft.playlist;
+                  onChange({ groupBy, playlist });
+                }}
+              >
+                <option value="">Don&rsquo;t split</option>
+                <option value="genre">Genre</option>
+                <option value="artist">Artist</option>
+              </select>
+            </Field>
+          )}
+          {draft.groupBy && !liked && (
             <NumberField
               label="Smallest playlist"
               suffix="songs"
@@ -293,6 +431,8 @@ function NumberField({
   onChange,
   placeholder = '–',
   disabled,
+  hint,
+  max,
 }: {
   label: string;
   suffix: string;
@@ -300,6 +440,8 @@ function NumberField({
   onChange: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
+  hint?: string;
+  max?: number;
 }) {
   return (
     <label className="field">
@@ -308,6 +450,7 @@ function NumberField({
         <input
           type="number"
           min={1}
+          max={max}
           step={1}
           inputMode="numeric"
           value={value}
@@ -317,6 +460,7 @@ function NumberField({
         />
         <span className="muted small">{suffix}</span>
       </span>
+      {hint && <span className="muted small">{hint}</span>}
     </label>
   );
 }

@@ -1,8 +1,18 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { applyRules, getSongs, logout, saveRawRules, syncRecentPlays, type Song } from '@/lib/playpilot';
-import type { RawRule } from '@/lib/rules-draft';
+import {
+  allowTrack,
+  applyRules,
+  excludeTrack,
+  getSongs,
+  logout,
+  removeFromCollection,
+  saveRawRules,
+  syncRecentPlays,
+  type Song,
+} from '@/lib/playpilot';
+import type { RawFile } from '@/lib/rules-draft';
 
 // How many songs to show per playlist in the results; the rest are counted.
 const SONGS_PER_GROUP = 6;
@@ -75,15 +85,51 @@ export async function applyAction() {
   });
 }
 
-export async function saveRulesAction(raw: { rules: RawRule[] }): Promise<{ ok: boolean; message: string }> {
+export async function saveRulesAction(raw: RawFile): Promise<{ ok: boolean; message: string }> {
   try {
     saveRawRules(raw);
     revalidatePath('/');
     revalidatePath('/settings');
-    return { ok: true, message: 'Saved. Your rules will be used on the next sync.' };
+    return { ok: true, message: 'Saved. PlaylistPilot will use these from now on.' };
   } catch (err) {
     return { ok: false, message: (err as Error).message };
   }
+}
+
+type SongResult = { ok: boolean; message: string };
+
+async function songAction(fn: () => Promise<string>): Promise<SongResult> {
+  try {
+    return { ok: true, message: await fn() };
+  } catch (err) {
+    return { ok: false, message: (err as Error).message };
+  } finally {
+    revalidatePath('/');
+    revalidatePath('/settings');
+  }
+}
+
+/** Never add this song automatically again. */
+export async function excludeAction(trackId: string) {
+  return songAction(async () => {
+    excludeTrack(trackId);
+    return 'This song won\u2019t be added automatically again.';
+  });
+}
+
+export async function allowAction(trackId: string) {
+  return songAction(async () => {
+    allowTrack(trackId);
+    return 'This song can be added automatically again.';
+  });
+}
+
+/** Take a song back out of everywhere PlaylistPilot put it. */
+export async function removeAction(trackId: string) {
+  return songAction(async () => {
+    const places = await removeFromCollection(trackId);
+    return places ? `Removed from ${plural(places, 'place')} PlaylistPilot added it.` : 'PlaylistPilot hadn\u2019t added this song anywhere.';
+  });
 }
 
 export async function logoutAction() {

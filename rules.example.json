@@ -1,23 +1,47 @@
 {
+  "settings": {
+    "sessionGapMinutes": 60,
+    "unmeasuredPlays": "ignore",
+    "autoApply": true
+  },
   "rules": [
+    {
+      "name": "Keepers",
+      "playlist": "PlaylistPilot · Keepers",
+      "match": {
+        "minPlays": 7,
+        "minCompletion": 80,
+        "minSessions": 2
+      },
+      "onlyUnsaved": true
+    },
     {
       "name": "On repeat",
       "playlist": "PlaylistPilot · On Repeat",
-      "match": { "minStreak": 3 },
+      "match": {
+        "minStreak": 3
+      },
       "onlyUnsaved": true
     },
     {
       "name": "Heavy rotation",
       "playlist": "PlaylistPilot · Heavy Rotation",
-      "match": { "minPlays": 5 },
+      "match": {
+        "minPlays": 5
+      },
       "onlyUnsaved": true
     },
     {
       "name": "This month's favourites",
       "playlist": "PlaylistPilot · This Month",
       "match": [
-        { "minPlays": 4, "withinDays": 30 },
-        { "minStreak": 3 }
+        {
+          "minPlays": 4,
+          "withinDays": 30
+        },
+        {
+          "minStreak": 3
+        }
       ],
       "onlyUnsaved": false,
       "maxTracks": 50
@@ -26,7 +50,9 @@
       "name": "By genre",
       "playlist": "PlaylistPilot · {group}",
       "groupBy": "genre",
-      "match": { "minPlays": 5 },
+      "match": {
+        "minPlays": 5
+      },
       "onlyUnsaved": true,
       "minGroupSize": 5
     },
@@ -34,7 +60,14 @@
       "name": "Afrobeats I keep playing",
       "enabled": false,
       "playlist": "PlaylistPilot · Afrobeats",
-      "match": { "minPlays": 3, "genres": ["afrobeats", "afropop", "alte"] }
+      "match": {
+        "minPlays": 3,
+        "genres": [
+          "afrobeats",
+          "afropop",
+          "alte"
+        ]
+      }
     }
   ]
 }
