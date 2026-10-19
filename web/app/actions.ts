@@ -1,39 +1,76 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { applyRules, logout, syncRecentPlays } from '@/lib/playpilot';
+import { applyRules, getSongs, logout, syncRecentPlays, type Song } from '@/lib/playpilot';
 
-export type ActionResult = { ok: boolean; lines: string[] };
+// How many songs to show per playlist in the results; the rest are counted.
+const SONGS_PER_GROUP = 6;
 
-async function run(fn: (log: (line: string) => void) => Promise<void>): Promise<ActionResult> {
-  const lines: string[] = [];
+export type ResultGroup = { playlist: string; rule: string; total: number; songs: Song[] };
+
+export type ActionResult = {
+  ok: boolean;
+  kind: 'sync' | 'preview' | 'apply';
+  message: string;
+  groups: ResultGroup[];
+};
+
+type Summary = { rule: string; playlist: string; added: string[] }[];
+
+async function run(kind: ActionResult['kind'], fn: () => Promise<Omit<ActionResult, 'ok' | 'kind'>>): Promise<ActionResult> {
   try {
-    await fn((line) => lines.push(line));
-    return { ok: true, lines };
+    return { ok: true, kind, ...(await fn()) };
   } catch (err) {
-    return { ok: false, lines: [...lines, (err as Error).message] };
+    return { ok: false, kind, message: (err as Error).message, groups: [] };
   } finally {
     revalidatePath('/');
   }
 }
 
+function toGroups(summary: Summary): ResultGroup[] {
+  return summary
+    .filter((r) => r.added.length > 0)
+    .map((r) => ({
+      playlist: r.playlist,
+      rule: r.rule,
+      total: r.added.length,
+      songs: getSongs(r.added.slice(0, SONGS_PER_GROUP)),
+    }));
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const quiet = () => {};
+
 export async function syncAction() {
-  return run(async (log) => {
+  return run('sync', async () => {
     const { added, possibleGap } = await syncRecentPlays();
-    log(`Recorded ${added} new play${added === 1 ? '' : 's'}.`);
-    if (possibleGap) log('Got a full page of 50 plays, so some older ones may have been missed.');
+    let message = added ? `Recorded ${plural(added, 'new play')}.` : 'No new plays since the last sync.';
+    if (possibleGap) message += ' Some older plays may have been missed, so sync more often.';
+    return { message, groups: [] };
   });
 }
 
 export async function previewAction() {
-  return run(async (log) => {
-    await applyRules({ dryRun: true, log });
+  return run('preview', async () => {
+    const groups = toGroups((await applyRules({ dryRun: true, log: quiet })) as Summary);
+    const songs = groups.reduce((n, g) => n + g.total, 0);
+    return {
+      message: songs
+        ? `${plural(songs, 'song')} would be added to ${plural(groups.length, 'playlist')}. Nothing has changed yet.`
+        : 'No songs match your rules right now.',
+      groups,
+    };
   });
 }
 
 export async function applyAction() {
-  return run(async (log) => {
-    await applyRules({ log });
+  return run('apply', async () => {
+    const groups = toGroups((await applyRules({ log: quiet })) as Summary);
+    const songs = groups.reduce((n, g) => n + g.total, 0);
+    return {
+      message: songs ? `Added ${plural(songs, 'song')} to ${plural(groups.length, 'playlist')}.` : 'Everything is already up to date.',
+      groups,
+    };
   });
 }
 

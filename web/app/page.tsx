@@ -1,13 +1,9 @@
-import { getOverview, getRules, getTopSongs, isLoggedIn } from '@/lib/playpilot';
+import { getOverview, getPlaylists, getRules, getTopSongs, isLoggedIn } from '@/lib/playpilot';
 import { logoutAction } from './actions';
 import { ActionsPanel } from './actions-panel';
+import { Cover, Icon, timeAgo, trackUrl, type IconName } from './ui';
 
 export const dynamic = 'force-dynamic';
-
-function formatTime(iso: string | null) {
-  if (!iso) return 'Never';
-  return new Date(iso).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
-}
 
 export default async function Home({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error } = await searchParams;
@@ -15,95 +11,203 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
   const overview = getOverview();
   const { rules, error: rulesError } = getRules();
   const songs = getTopSongs();
+  const playlists = getPlaylists();
+  const maxPlays = songs[0]?.plays ?? 1;
 
   return (
-    <main className="page">
-      <header className="header">
-        <div>
-          <h1>PlayPilot</h1>
-          <p className="muted">Saves the songs you keep replaying, so you don&rsquo;t have to.</p>
+    <>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <div className="brand">
+            <span className="logo">
+              <Icon name="logo" size={18} />
+            </span>
+            PlayPilot
+          </div>
+          {loggedIn ? (
+            <form action={logoutAction} className="account">
+              <span className="pill">
+                <span className="dot" /> Connected to Spotify
+              </span>
+              <button className="link-button" type="submit">
+                Disconnect
+              </button>
+            </form>
+          ) : (
+            <a className="button primary small-button" href="/api/auth/login">
+              Connect Spotify
+            </a>
+          )}
         </div>
-        {loggedIn ? (
-          <form action={logoutAction} className="account">
-            <span className="badge">Connected to Spotify</span>
-            <button className="link-button" type="submit">Disconnect</button>
-          </form>
-        ) : (
-          <a className="button primary" href="/api/auth/login">Connect Spotify</a>
-        )}
       </header>
 
-      {error && <p className="alert">{error}</p>}
+      <main className="page">
+        {error && (
+          <div className="alert" role="alert">
+            <Icon name="alert" />
+            <span>{error}</span>
+            <a href="/" className="alert-close">
+              Dismiss
+            </a>
+          </div>
+        )}
 
-      <section className="overview">
-        <Stat label="Plays recorded" value={overview.plays.toLocaleString()} />
-        <Stat label="Different songs" value={overview.songs.toLocaleString()} />
-        <Stat label="Songs auto-saved" value={overview.autoAdded.toLocaleString()} />
-        <Stat label="Latest play" value={formatTime(overview.latestPlay)} small />
-      </section>
-
-      <ActionsPanel disabled={!loggedIn} />
-
-      <div className="columns">
-        <section className="card">
-          <h2>Your rules</h2>
-          <p className="muted small">Edit these in <code>rules.json</code>.</p>
-          {rulesError ? (
-            <p className="alert">{rulesError}</p>
-          ) : (
-            <ul className="rules">
-              {rules.map((rule) => (
-                <li key={rule.name}>
-                  <strong>{rule.playlist}</strong>
-                  <span>{rule.description}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+        <section className="hero">
+          <h1>Your repeats, saved automatically.</h1>
+          <p className="lead">
+            PlayPilot keeps an eye on what you play on Spotify. Songs you keep coming back to go into playlists, so you
+            never lose one because you forgot to save it.
+          </p>
         </section>
 
-        <section className="card">
-          <h2>Most played</h2>
-          {songs.length === 0 ? (
-            <p className="muted">No plays yet. Connect Spotify and press <em>Sync plays</em>.</p>
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Song</th>
-                    <th className="num">Plays</th>
-                    <th className="num" title="Most plays back to back">In a row</th>
-                    <th className="num">30 days</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {songs.map((song) => (
-                    <tr key={song.id}>
-                      <td>
-                        <div className="song">{song.name}</div>
-                        <div className="muted small">{song.artists}</div>
-                      </td>
-                      <td className="num">{song.plays}</td>
-                      <td className="num">{song.bestStreak}</td>
-                      <td className="num">{song.last30Days}</td>
-                    </tr>
+        {!loggedIn && (
+          <section className="card onboarding">
+            <h2>Get started</h2>
+            <ol className="steps">
+              <Step n={1} title="Connect Spotify" text="So PlayPilot can see your recent plays and manage its playlists." />
+              <Step n={2} title="Sync your plays" text="Spotify only shares your last 50, so keep PlayPilot running to build up history." />
+              <Step n={3} title="Preview, then apply" text="See exactly which songs each rule would add before anything changes." />
+            </ol>
+            <a className="button primary" href="/api/auth/login">
+              <Icon name="logo" size={16} /> Connect Spotify
+            </a>
+          </section>
+        )}
+
+        <section className="stats">
+          <Stat icon="play" label="Plays recorded" value={overview.plays.toLocaleString()} />
+          <Stat icon="list" label="Different songs" value={overview.songs.toLocaleString()} />
+          <Stat icon="bolt" label="Songs auto-saved" value={overview.autoAdded.toLocaleString()} accent />
+          <Stat icon="clock" label="Latest play" value={timeAgo(overview.latestPlay)} />
+        </section>
+
+        <ActionsPanel disabled={!loggedIn} />
+
+        <div className="columns">
+          <div className="stack">
+            <section className="card">
+              <div className="card-head">
+                <h2>Your rules</h2>
+                <span className="muted small">
+                  Edit in <code>rules.json</code>
+                </span>
+              </div>
+              {rulesError ? (
+                <p className="alert">{rulesError}</p>
+              ) : (
+                <ul className="rules">
+                  {rules.map((rule) => (
+                    <li key={rule.name} className="rule">
+                      <span className={`rule-icon rule-${rule.icon}`}>
+                        <Icon name={rule.icon} size={18} />
+                      </span>
+                      <div className="rule-body">
+                        <strong>{rule.playlist}</strong>
+                        <p className="muted small">{rule.description}</p>
+                        <div className="chips">
+                          {rule.chips.map((chip) => (
+                            <span key={chip} className="chip">
+                              {chip}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </li>
                   ))}
-                </tbody>
-              </table>
+                </ul>
+              )}
+            </section>
+
+            <section className="card">
+              <div className="card-head">
+                <h2>Your PlayPilot playlists</h2>
+              </div>
+              {playlists.length === 0 ? (
+                <p className="muted small">They&rsquo;ll show up here after you apply your rules for the first time.</p>
+              ) : (
+                <ul className="playlists">
+                  {playlists.map((p) => (
+                    <li key={p.id}>
+                      <a href={p.url} target="_blank" rel="noreferrer" className="playlist-link">
+                        <span className="playlist-name">{p.name}</span>
+                        <span className="muted small">
+                          {p.songsAdded} added <Icon name="external" size={13} />
+                        </span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
+
+          <section className="card">
+            <div className="card-head">
+              <h2>Most played</h2>
+              <span className="muted small">All time</span>
             </div>
-          )}
-        </section>
-      </div>
-    </main>
+            {songs.length === 0 ? (
+              <div className="empty">
+                <Icon name="play" size={28} />
+                <p>No plays yet.</p>
+                <p className="muted small">Connect Spotify and press Sync plays to start counting.</p>
+              </div>
+            ) : (
+              <ol className="songs">
+                {songs.map((song, i) => (
+                  <li key={song.id} className="song-row">
+                    <span className="rank">{i + 1}</span>
+                    <Cover id={song.id} name={song.name} imageUrl={song.imageUrl} />
+                    <div className="song-info">
+                      <a href={trackUrl(song.id)} target="_blank" rel="noreferrer" className="song-name">
+                        {song.name}
+                      </a>
+                      <span className="muted small truncate">{song.artists}</span>
+                    </div>
+                    <div className="song-meta">
+                      {song.bestStreak >= 3 && (
+                        <span className="badge" title={`Played ${song.bestStreak} times in a row`}>
+                          <Icon name="repeat" size={12} /> {song.bestStreak}×
+                        </span>
+                      )}
+                      <div className="plays" title={`${song.last30Days} plays in the last 30 days`}>
+                        <span className="plays-count">{song.plays}</span>
+                        <span className="bar">
+                          <span style={{ width: `${(song.plays / maxPlays) * 100}%` }} />
+                        </span>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </section>
+        </div>
+      </main>
+    </>
   );
 }
 
-function Stat({ label, value, small }: { label: string; value: string; small?: boolean }) {
+function Stat({ icon, label, value, accent }: { icon: IconName; label: string; value: string; accent?: boolean }) {
   return (
-    <div className="stat">
+    <div className={accent ? 'stat stat-accent' : 'stat'}>
+      <span className="stat-icon">
+        <Icon name={icon} size={16} />
+      </span>
+      <span className="stat-value">{value}</span>
       <span className="muted small">{label}</span>
-      <span className={small ? 'stat-value small-value' : 'stat-value'}>{value}</span>
     </div>
+  );
+}
+
+function Step({ n, title, text }: { n: number; title: string; text: string }) {
+  return (
+    <li className="step">
+      <span className="step-n">{n}</span>
+      <div>
+        <strong>{title}</strong>
+        <p className="muted small">{text}</p>
+      </div>
+    </li>
   );
 }
