@@ -1,45 +1,22 @@
 import { getOverview, getPlaylists, getRules, getTopSongs, isLoggedIn } from '@/lib/playpilot';
-import { logoutAction } from './actions';
+import Link from 'next/link';
 import { ActionsPanel } from './actions-panel';
+import { Topbar } from './topbar';
 import { Cover, Icon, timeAgo, trackUrl, type IconName } from './ui';
 
 export const dynamic = 'force-dynamic';
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
-  const { error } = await searchParams;
+export default async function Home({ searchParams }: { searchParams: Promise<{ error?: string; page?: string }> }) {
+  const { error, page } = await searchParams;
   const loggedIn = isLoggedIn();
   const overview = getOverview();
   const { rules, error: rulesError } = getRules();
-  const songs = getTopSongs();
+  const { songs, total, page: currentPage, pages, maxPlays } = getTopSongs(Number(page) || 1);
   const playlists = getPlaylists();
-  const maxPlays = songs[0]?.plays ?? 1;
 
   return (
     <>
-      <header className="topbar">
-        <div className="topbar-inner">
-          <div className="brand">
-            <span className="logo">
-              <Icon name="logo" size={18} />
-            </span>
-            PlayPilot
-          </div>
-          {loggedIn ? (
-            <form action={logoutAction} className="account">
-              <span className="pill">
-                <span className="dot" /> Connected to Spotify
-              </span>
-              <button className="link-button" type="submit">
-                Disconnect
-              </button>
-            </form>
-          ) : (
-            <a className="button primary small-button" href="/api/auth/login">
-              Connect Spotify
-            </a>
-          )}
-        </div>
-      </header>
+      <Topbar current="dashboard" />
 
       <main className="page">
         {error && (
@@ -88,9 +65,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
             <section className="card">
               <div className="card-head">
                 <h2>Your rules</h2>
-                <span className="muted small">
-                  Edit in <code>rules.json</code>
-                </span>
+                <Link href="/settings" className="text-link small">
+                  Edit rules
+                </Link>
               </div>
               {rulesError ? (
                 <p className="alert">{rulesError}</p>
@@ -141,10 +118,12 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
             </section>
           </div>
 
-          <section className="card">
+          <section className="card" id="most-played">
             <div className="card-head">
               <h2>Most played</h2>
-              <span className="muted small">All time</span>
+              <span className="muted small">
+                {total.toLocaleString()} song{total === 1 ? '' : 's'}, all time
+              </span>
             </div>
             {songs.length === 0 ? (
               <div className="empty">
@@ -154,9 +133,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
               </div>
             ) : (
               <ol className="songs">
-                {songs.map((song, i) => (
+                {songs.map((song) => (
                   <li key={song.id} className="song-row">
-                    <span className="rank">{i + 1}</span>
+                    <span className="rank">{song.rank}</span>
                     <Cover id={song.id} name={song.name} imageUrl={song.imageUrl} />
                     <div className="song-info">
                       <a href={trackUrl(song.id)} target="_blank" rel="noreferrer" className="song-name">
@@ -181,6 +160,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
                 ))}
               </ol>
             )}
+            {pages > 1 && <Pagination page={currentPage} pages={pages} />}
           </section>
         </div>
       </main>
@@ -209,5 +189,31 @@ function Step({ n, title, text }: { n: number; title: string; text: string }) {
         <p className="muted small">{text}</p>
       </div>
     </li>
+  );
+}
+
+function Pagination({ page, pages }: { page: number; pages: number }) {
+  // scroll={false} keeps you at the list instead of jumping to the top.
+  const href = (p: number) => (p === 1 ? '/' : `/?page=${p}`);
+  return (
+    <nav className="pagination" aria-label="Most played pages">
+      {page > 1 ? (
+        <Link href={href(page - 1)} className="page-button" scroll={false}>
+          Previous
+        </Link>
+      ) : (
+        <span className="page-button disabled">Previous</span>
+      )}
+      <span className="muted small">
+        Page {page} of {pages}
+      </span>
+      {page < pages ? (
+        <Link href={href(page + 1)} className="page-button" scroll={false}>
+          Next
+        </Link>
+      ) : (
+        <span className="page-button disabled">Next</span>
+      )}
+    </nav>
   );
 }

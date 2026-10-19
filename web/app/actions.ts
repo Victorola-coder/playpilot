@@ -1,7 +1,8 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { applyRules, getSongs, logout, syncRecentPlays, type Song } from '@/lib/playpilot';
+import { applyRules, getSongs, logout, saveRawRules, syncRecentPlays, type Song } from '@/lib/playpilot';
+import type { RawRule } from '@/lib/rules-draft';
 
 // How many songs to show per playlist in the results; the rest are counted.
 const SONGS_PER_GROUP = 6;
@@ -72,6 +73,17 @@ export async function applyAction() {
       groups,
     };
   });
+}
+
+export async function saveRulesAction(raw: { rules: RawRule[] }): Promise<{ ok: boolean; message: string }> {
+  try {
+    saveRawRules(raw);
+    revalidatePath('/');
+    revalidatePath('/settings');
+    return { ok: true, message: 'Saved. Your rules will be used on the next sync.' };
+  } catch (err) {
+    return { ok: false, message: (err as Error).message };
+  }
 }
 
 export async function logoutAction() {

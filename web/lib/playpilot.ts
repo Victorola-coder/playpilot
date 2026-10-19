@@ -1,9 +1,12 @@
 import 'server-only';
 import { NextResponse } from 'next/server';
-import { config } from '../../src/config.js';
+import path from 'node:path';
+import { existsSync } from 'node:fs';
+import { ROOT, config } from '../../src/config.js';
 import { getDb, kvGet, kvSet, loadPlays, loadTracks } from '../../src/db.js';
 import { computeTrackStats, playsWithinDays } from '../../src/stats.js';
-import { loadRules } from '../../src/rules.js';
+import { loadRules, readRawRules, saveRules } from '../../src/rules.js';
+import type { RawRule } from './rules-draft';
 
 export { isLoggedIn, startLogin, finishLogin } from '../../src/auth.js';
 export { syncRecentPlays } from '../../src/sync.js';
@@ -28,7 +31,7 @@ export function redirectTo(url: URL | string) {
 
 export type Song = { id: string; name: string; artists: string; imageUrl: string | null };
 
-export type TopSong = Song & { plays: number; bestStreak: number; last30Days: number };
+export type TopSong = Song & { rank: number; plays: number; bestStreak: number; last30Days: number };
 
 export type RuleIcon = 'repeat' | 'flame' | 'calendar' | 'tag';
 
@@ -67,17 +70,25 @@ export function getSongs(ids: string[]): Song[] {
   return ids.map((id) => toSong(id, tracks.get(id)));
 }
 
-export function getTopSongs(limit = 20): TopSong[] {
+export const SONGS_PER_PAGE = 10;
+
+/** One page of your most-played songs. `page` is 1-based and clamped to the valid range. */
+export function getTopSongs(page = 1) {
   const tracks = loadTracks();
-  return [...computeTrackStats(loadPlays()).values()]
-    .sort((a, b) => b.plays - a.plays || b.lastPlayed - a.lastPlayed)
-    .slice(0, limit)
-    .map((s) => ({
-      ...toSong(s.trackId, tracks.get(s.trackId)),
-      plays: s.plays,
-      bestStreak: s.bestStreak,
-      last30Days: playsWithinDays(s, 30),
-    }));
+  const all = [...computeTrackStats(loadPlays()).values()].sort(
+    (a, b) => b.plays - a.plays || b.lastPlayed - a.lastPlayed,
+  );
+  const pages = Math.max(1, Math.ceil(all.length / SONGS_PER_PAGE));
+  const current = Math.min(Math.max(1, Math.floor(page) || 1), pages);
+  const start = (current - 1) * SONGS_PER_PAGE;
+  const songs: TopSong[] = all.slice(start, start + SONGS_PER_PAGE).map((s, i) => ({
+    ...toSong(s.trackId, tracks.get(s.trackId)),
+    rank: start + i + 1,
+    plays: s.plays,
+    bestStreak: s.bestStreak,
+    last30Days: playsWithinDays(s, 30),
+  }));
+  return { songs, total: all.length, page: current, pages, maxPlays: all[0]?.plays ?? 1 };
 }
 
 export function getPlaylists(): ManagedPlaylist[] {
@@ -154,4 +165,22 @@ export function getRules(): { rules: RuleSummary[]; error: string | null } {
   } catch (err) {
     return { rules: [], error: (err as Error).message };
   }
+}
+
+/**
+ * Rules as written in rules.json, for the settings form. Falls back to the
+ * example rules when there's no rules.json yet; saving then creates it.
+ */
+export function getRawRules(): { rules: RawRule[]; error: string | null; isExample: boolean } {
+  const isExample = !existsSync(config.rulesPath);
+  try {
+    const raw = readRawRules(isExample ? path.join(ROOT, 'rules.example.json') : config.rulesPath);
+    return { rules: Array.isArray(raw?.rules) ? raw.rules : [], error: null, isExample };
+  } catch (err) {
+    return { rules: [], error: (err as Error).message, isExample };
+  }
+}
+
+export function saveRawRules(raw: { rules: RawRule[] }) {
+  saveRules(config.rulesPath, raw);
 }

@@ -54,6 +54,11 @@ export function normalizeRules(raw) {
       if (!rule.playlist || typeof rule.playlist !== 'string') fail(name, 'needs a "playlist" name.');
       if (!rule.match) fail(name, 'needs a "match" section saying which songs to pick.');
       if (rule.groupBy && !GROUP_BY.has(rule.groupBy)) fail(name, '"groupBy" must be "genre" or "artist".');
+      for (const key of ['minGroupSize', 'maxTracks']) {
+        if (key in rule && !(Number.isInteger(rule[key]) && rule[key] > 0)) {
+          fail(name, `"${key}" must be a whole number above 0.`);
+        }
+      }
 
       let playlist = rule.playlist;
       if (rule.groupBy && !playlist.includes('{group}')) playlist += ' · {group}';
