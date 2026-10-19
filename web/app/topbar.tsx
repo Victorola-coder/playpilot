@@ -13,7 +13,7 @@ export function Topbar({ current }: { current: 'dashboard' | 'settings' }) {
             <span className="logo">
               <Icon name="logo" size={18} />
             </span>
-            PlayPilot
+            PlaylistPilot
           </Link>
           <nav className="nav">
             <Link href="/" className={current === 'dashboard' ? 'nav-link active' : 'nav-link'}>

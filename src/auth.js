@@ -52,7 +52,7 @@ export async function getAccessToken() {
 
 export const isLoggedIn = () => Boolean(kvGet('auth')?.refreshToken);
 
-/** False when the account was connected before PlayPilot asked for this permission. */
+/** False when the account was connected before PlaylistPilot asked for this permission. */
 export const hasScope = (scope) => (kvGet('auth')?.scope ?? '').split(' ').includes(scope);
 
 /** Builds the Spotify consent URL. Keep `verifier` and `state` until the callback. */
@@ -97,9 +97,9 @@ export function login() {
       }
       const finish = (status, message, err) => {
         res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(`<!doctype html><meta charset="utf-8"><title>PlayPilot</title>
+        res.end(`<!doctype html><meta charset="utf-8"><title>PlaylistPilot</title>
           <body style="font-family:system-ui;padding:3rem;max-width:32rem;margin:auto">
-          <h1>PlayPilot</h1><p>${message}</p></body>`);
+          <h1>PlaylistPilot</h1><p>${message}</p></body>`);
         server.close();
         err ? reject(err) : resolve();
       };

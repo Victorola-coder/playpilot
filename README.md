@@ -1,12 +1,14 @@
-# PlayPilot
+# PlaylistPilot
 
-PlayPilot watches what you play on Spotify and saves the songs you keep coming back to into playlists, so you don't have to remember to save them yourself.
+*Navigating your music taste, one replay at a time.*
+
+PlaylistPilot watches what you play on Spotify and saves the songs you keep coming back to into playlists, so you don't have to remember to save them yourself.
 
 Examples of what it can do:
 
-- Put any song you played **3+ times in a row** into *PlayPilot · On Repeat*
-- Put any song you played **5+ times** that isn't in Liked Songs or any of your playlists into *PlayPilot · Heavy Rotation*
-- Build one playlist per **genre** (*PlayPilot · Afrobeats*, *PlayPilot · Rap*, …) out of your most-played songs
+- Put any song you played **3+ times in a row** into *PlaylistPilot · On Repeat*
+- Put any song you played **5+ times** that isn't in Liked Songs or any of your playlists into *PlaylistPilot · Heavy Rotation*
+- Build one playlist per **genre** (*PlaylistPilot · Afrobeats*, *PlaylistPilot · Rap*, …) out of your most-played songs
 
 Everything runs on your own computer. Your play history stays in a local SQLite file.
 
@@ -31,7 +33,7 @@ You need Node.js 22.13 or newer and a Spotify **Premium** account. Spotify requi
 
 ### Optional: import your past listening
 
-Spotify only shows apps your **last 50 plays**, so PlayPilot starts counting from when you first run it. To get your full history:
+Spotify only shows apps your **last 50 plays**, so PlaylistPilot starts counting from when you first run it. To get your full history:
 
 1. Go to Spotify **Account → Privacy settings** and request **Extended streaming history**. It takes a few days to arrive by email.
 2. Unzip it, then:
@@ -74,7 +76,7 @@ Rules live in `rules.json`. Each rule picks songs and puts them in a playlist:
 ```json
 {
   "name": "Heavy rotation",
-  "playlist": "PlayPilot · Heavy Rotation",
+  "playlist": "PlaylistPilot · Heavy Rotation",
   "match": { "minPlays": 5 },
   "onlyUnsaved": true
 }
@@ -111,8 +113,8 @@ To match songs that meet **any** of several conditions, make `match` a list:
 - **A play** is any listen Spotify counts, which means about 30 seconds or more. Skips don't count.
 - **In a row** means the same song played consecutively, with no more than 30 minutes between the plays.
 - **Saved** means the song is in Liked Songs or in a playlist you own or collaborate on. Spotify doesn't let apps read playlists you only follow, so those don't count.
-- PlayPilot **only adds** songs; it never removes them. If you delete a song from a PlayPilot playlist, it won't be added back.
-- If you already have a playlist with exactly the same name as a rule's playlist, PlayPilot uses that playlist instead of creating a new one.
+- PlaylistPilot **only adds** songs; it never removes them. If you delete a song from a PlaylistPilot playlist, it won't be added back.
+- If you already have a playlist with exactly the same name as a rule's playlist, PlaylistPilot uses that playlist instead of creating a new one.
 
 ## Keep it running
 
@@ -136,7 +138,7 @@ To match songs that meet **any** of several conditions, make `match` a list:
 </dict></plist>
 ```
 
-Then run `launchctl load ~/Library/LaunchAgents/com.playpilot.plist`. While your Mac is asleep, PlayPilot can't see plays from your phone. Anything beyond the last 50 plays is lost, so for heavy listening you may want to host it on a small always-on server.
+Then run `launchctl load ~/Library/LaunchAgents/com.playpilot.plist`. While your Mac is asleep, PlaylistPilot can't see plays from your phone. Anything beyond the last 50 plays is lost, so for heavy listening you may want to host it on a small always-on server.
 
 ## Limits
 

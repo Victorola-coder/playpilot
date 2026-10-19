@@ -14,7 +14,7 @@ export default function SettingsPage() {
         <section className="hero">
           <h1>Settings</h1>
           <p className="lead">
-            Choose which songs PlayPilot saves and where they go. Changes are saved to <code>rules.json</code>, so the
+            Choose which songs PlaylistPilot saves and where they go. Changes are saved to <code>rules.json</code>, so the
             command line uses them too.
           </p>
         </section>

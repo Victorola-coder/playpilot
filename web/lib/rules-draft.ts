@@ -47,7 +47,7 @@ export function newRuleDraft(existing: RuleDraft[]): RuleDraft {
   return {
     key: newKey(),
     name: `Rule ${n}`,
-    playlist: `PlayPilot · Rule ${n}`,
+    playlist: `PlaylistPilot · Rule ${n}`,
     enabled: true,
     conditions: [{ ...emptyCondition(), minPlays: '5' }],
     onlyUnsaved: true,

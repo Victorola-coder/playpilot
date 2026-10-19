@@ -67,7 +67,7 @@ export function NowPlaying() {
         <span className="now-icon">
           <Icon name="play" size={16} />
         </span>
-        <p className="now-text">Reconnect Spotify once so PlayPilot can show what you&rsquo;re playing right now.</p>
+        <p className="now-text">Reconnect Spotify once so PlaylistPilot can show what you&rsquo;re playing right now.</p>
         <a className="button primary small-button" href="/api/auth/login">
           Reconnect
         </a>
@@ -131,7 +131,7 @@ export function NowPlaying() {
             )}
           </>
         ) : (
-          <span className="muted small">New to PlayPilot. It&rsquo;ll be counted on the next sync.</span>
+          <span className="muted small">New to PlaylistPilot. It&rsquo;ll be counted on the next sync.</span>
         )}
       </div>
     </section>

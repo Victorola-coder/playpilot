@@ -5,8 +5,8 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' });
 
 export const metadata: Metadata = {
-  title: 'PlayPilot',
-  description: 'Automatically saves the songs you keep replaying on Spotify.',
+  title: 'PlaylistPilot',
+  description: 'Navigating your music taste, one replay at a time.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

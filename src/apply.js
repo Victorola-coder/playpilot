@@ -5,7 +5,7 @@ import { computeTrackStats } from './stats.js';
 import { groupTracks, loadRules, matchTracks, needsGenres } from './rules.js';
 
 const GENRE_CACHE_DAYS = 30;
-const PLAYLIST_DESCRIPTION = 'Kept up to date automatically by PlayPilot.';
+const PLAYLIST_DESCRIPTION = 'Kept up to date automatically by PlaylistPilot.';
 
 async function playlistTrackIds(playlist) {
   const d = getDb();
@@ -26,7 +26,7 @@ async function playlistTrackIds(playlist) {
 
 /**
  * Everything you have "saved yourself": Liked Songs plus every playlist you own
- * or collaborate on, except the ones PlayPilot manages.
+ * or collaborate on, except the ones PlaylistPilot manages.
  * Spotify no longer lets dev-mode apps read playlists you only follow.
  */
 async function loadLibrary(me, managedIds) {

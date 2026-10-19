@@ -2,19 +2,19 @@
   "rules": [
     {
       "name": "On repeat",
-      "playlist": "PlayPilot · On Repeat",
+      "playlist": "PlaylistPilot · On Repeat",
       "match": { "minStreak": 3 },
       "onlyUnsaved": true
     },
     {
       "name": "Heavy rotation",
-      "playlist": "PlayPilot · Heavy Rotation",
+      "playlist": "PlaylistPilot · Heavy Rotation",
       "match": { "minPlays": 5 },
       "onlyUnsaved": true
     },
     {
       "name": "This month's favourites",
-      "playlist": "PlayPilot · This Month",
+      "playlist": "PlaylistPilot · This Month",
       "match": [
         { "minPlays": 4, "withinDays": 30 },
         { "minStreak": 3 }
@@ -24,7 +24,7 @@
     },
     {
       "name": "By genre",
-      "playlist": "PlayPilot · {group}",
+      "playlist": "PlaylistPilot · {group}",
       "groupBy": "genre",
       "match": { "minPlays": 5 },
       "onlyUnsaved": true,
@@ -33,7 +33,7 @@
     {
       "name": "Afrobeats I keep playing",
       "enabled": false,
-      "playlist": "PlayPilot · Afrobeats",
+      "playlist": "PlaylistPilot · Afrobeats",
       "match": { "minPlays": 3, "genres": ["afrobeats", "afropop", "alte"] }
     }
   ]

@@ -6,7 +6,7 @@ import { applyRules } from './apply.js';
 import { computeTrackStats, playsWithinDays } from './stats.js';
 import { loadPlays, loadTracks } from './db.js';
 
-const HELP = `PlayPilot - auto-save the songs you keep replaying
+const HELP = `PlaylistPilot - auto-save the songs you keep replaying
 
 Usage: node src/cli.js <command>
 
@@ -49,7 +49,7 @@ async function runForever() {
   const doSync = safely(sync);
   const doApply = safely(() => applyRules());
 
-  console.log('PlayPilot is running. Press Ctrl+C to stop.');
+  console.log('PlaylistPilot is running. Press Ctrl+C to stop.');
   await doSync();
   await doApply();
   setInterval(doSync, config.syncMinutes * 60_000);

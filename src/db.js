@@ -28,13 +28,13 @@ const SCHEMA = `
     fetched_at TEXT
   );
 
-  -- Playlists PlayPilot created or adopted, keyed by the name in rules.json
+  -- Playlists PlaylistPilot created or adopted, keyed by the name in rules.json
   CREATE TABLE IF NOT EXISTS managed_playlists (
     name TEXT PRIMARY KEY,
     id   TEXT NOT NULL
   );
 
-  -- Every track PlayPilot added. If you remove one by hand, it is never re-added.
+  -- Every track PlaylistPilot added. If you remove one by hand, it is never re-added.
   CREATE TABLE IF NOT EXISTS auto_adds (
     playlist_id TEXT NOT NULL,
     track_id    TEXT NOT NULL,

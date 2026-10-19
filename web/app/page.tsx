@@ -31,9 +31,9 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
         )}
 
         <section className="hero">
-          <h1>Your repeats, saved automatically.</h1>
+          <h1>Navigating your music taste, one replay at a time.</h1>
           <p className="lead">
-            PlayPilot keeps an eye on what you play on Spotify. Songs you keep coming back to go into playlists, so you
+            PlaylistPilot keeps an eye on what you play on Spotify. Songs you keep coming back to go into playlists, so you
             never lose one because you forgot to save it.
           </p>
         </section>
@@ -44,8 +44,8 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
           <section className="card onboarding">
             <h2>Get started</h2>
             <ol className="steps">
-              <Step n={1} title="Connect Spotify" text="So PlayPilot can see your recent plays and manage its playlists." />
-              <Step n={2} title="Sync your plays" text="Spotify only shares your last 50, so keep PlayPilot running to build up history." />
+              <Step n={1} title="Connect Spotify" text="So PlaylistPilot can see your recent plays and manage its playlists." />
+              <Step n={2} title="Sync your plays" text="Spotify only shares your last 50, so keep PlaylistPilot running to build up history." />
               <Step n={3} title="Preview, then apply" text="See exactly which songs each rule would add before anything changes." />
             </ol>
             <a className="button primary" href="/api/auth/login">
@@ -100,7 +100,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ e
 
             <section className="card">
               <div className="card-head">
-                <h2>Your PlayPilot playlists</h2>
+                <h2>Your PlaylistPilot playlists</h2>
               </div>
               {playlists.length === 0 ? (
                 <p className="muted small">They&rsquo;ll show up here after you apply your rules for the first time.</p>
